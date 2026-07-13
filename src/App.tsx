@@ -5,6 +5,7 @@ import { themes } from "./theme.js";
 import HomeView from "./components/HomeView.js";
 import ChatView from "./components/ChatView.js";
 import ThemeSelector from "./components/ThemeSelector.js";
+import CatBackground from "./components/CatBackground.js";
 import { Shield, ShieldCheck, X } from "lucide-react";
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, deleteField } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "./lib/firebase.js";
@@ -45,8 +46,26 @@ export default function App() {
     }
   }, [gracePeriodBanner]);
 
+  // Dynamic Favicon for Cat Theme
+  useEffect(() => {
+    let link = document.querySelector("link[rel*='icon']") as HTMLLinkElement;
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "shortcut icon";
+      document.getElementsByTagName("head")[0].appendChild(link);
+    }
+    if (currentTheme === "cat") {
+      link.type = "image/svg+xml";
+      link.href = "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🐈</text></svg>";
+    } else {
+      link.type = "image/x-icon";
+      link.href = "/favicon.ico";
+    }
+  }, [currentTheme]);
+
   // Security references for timeouts
   const tabTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const unsubscribesRef = useRef<(() => void)[]>([]);
 
   // 3. Auto-Restore session on initial mount / page refresh
   useEffect(() => {
@@ -123,7 +142,7 @@ export default function App() {
     const resetInactivityTimer = () => {
       if (inactivityTimer) clearTimeout(inactivityTimer);
       inactivityTimer = setTimeout(() => {
-        triggerLogout(false);
+        triggerLogout(false, true);
       }, 30 * 60 * 1000); // 30 minutes
     };
 
@@ -142,39 +161,89 @@ export default function App() {
     };
   }, [view, sessionToken]);
 
-  // 6. Cleanup presence on tab/page close
+  // 6. Cleanup presence on unexpected exits (beforeunload, pagehide, visibilitychange)
   useEffect(() => {
-    const handleBeforeUnload = () => {
+    const handleExit = () => {
       const uid = sessionStorage.getItem("chat_uid");
+      const activeNick = sessionStorage.getItem("chat_nickname") || nickname;
       if (uid && view === "chat") {
         const chatRef = doc(db, "chat", "1317");
-        // Fire-and-forget Firestore updates are standard on browser close attempts
-        updateDoc(chatRef, {
+        const updates: Record<string, any> = {
           [`members.${uid}`]: deleteField()
-        }).catch(() => {});
+        };
+        if (activeNick) {
+          updates[`lastSeen.${activeNick}`] = deleteField();
+        }
+        // Fire-and-forget Firestore updates on unexpected browser tab close attempts
+        updateDoc(chatRef, updates).catch(() => {});
       }
     };
-    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    window.addEventListener("beforeunload", handleExit);
+    window.addEventListener("pagehide", handleExit);
+
     return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("beforeunload", handleExit);
+      window.removeEventListener("pagehide", handleExit);
     };
-  }, [view]);
+  }, [view, nickname]);
+
+  // 7. Heartbeat: update lastSeen field every 15 seconds while user is logged in
+  useEffect(() => {
+    if (view !== "chat" || !nickname) return;
+
+    const uid = sessionStorage.getItem("chat_uid");
+    if (!uid) return;
+
+    const sendHeartbeat = async () => {
+      try {
+        const chatRef = doc(db, "chat", "1317");
+        await updateDoc(chatRef, {
+          [`lastSeen.${nickname}`]: Date.now()
+        });
+      } catch (err) {
+        console.error("Heartbeat failed:", err);
+      }
+    };
+
+    // Initial heartbeat immediately upon entering
+    sendHeartbeat();
+
+    const interval = setInterval(sendHeartbeat, 15000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [view, nickname]);
 
   // Logout Trigger helper with active presence pruning
-  const triggerLogout = async (byTabHidden = false) => {
+  const triggerLogout = async (byTabHidden = false, byInactivity = false) => {
+    // 1. Stop all Firestore realtime listeners.
+    unsubscribesRef.current.forEach((unsub) => {
+      try {
+        unsub();
+      } catch (e) {
+        console.error("Failed to stop Firestore listener on logout:", e);
+      }
+    });
+    unsubscribesRef.current = [];
+
     const activeNick = sessionStorage.getItem("chat_nickname") || nickname;
     const uid = sessionStorage.getItem("chat_uid");
 
+    // 2. Remove the current user from the activeUsers collection (or wherever active users are stored).
     if (uid) {
       try {
         const chatRef = doc(db, "chat", "1317");
-        try {
-          await updateDoc(chatRef, {
-            [`members.${uid}`]: deleteField()
-          });
-        } catch (err) {
-          handleFirestoreError(err, OperationType.UPDATE, "chat/1317");
+        const updates: Record<string, any> = {
+          [`members.${uid}`]: deleteField()
+        };
+        if (activeNick) {
+          updates[`lastSeen.${activeNick}`] = deleteField();
         }
+
+        // 3. Wait until the Firestore delete/update operation completes successfully using await.
+        await updateDoc(chatRef, updates);
 
         const messagesRef = collection(db, "chat", "1317", "messages");
         try {
@@ -191,15 +260,22 @@ export default function App() {
       }
     }
 
-    sessionStorage.clear();
+    // 4. Clear local React state.
     setSessionToken("");
     setRoomCode("");
     setNickname("");
+
+    // 5. Clear sessionStorage.
+    sessionStorage.clear();
+
+    // 6. Clear any in-memory authentication state (none in our custom unauthenticated setup).
+
+    // 7. Redirect to the login page.
     setView("home");
 
     if (byTabHidden) {
       setSecurityNotice("You have been automatically logged out to preserve your privacy after leaving the browser tab for over 30 seconds.");
-    } else {
+    } else if (byInactivity) {
       setSecurityNotice("You have been logged out automatically due to 30 minutes of inactivity.");
     }
   };
@@ -222,11 +298,15 @@ export default function App() {
       }
 
       let members: Record<string, string> = {};
+      let lastSeenMap: Record<string, number> = {};
+
       if (snap.exists()) {
-        members = snap.data().members || {};
+        const data = snap.data();
+        members = data.members || {};
+        lastSeenMap = data.lastSeen || {};
       } else {
         try {
-          await setDoc(chatRef, { members: {} });
+          await setDoc(chatRef, { members: {}, lastSeen: {} });
         } catch (err) {
           handleFirestoreError(err, OperationType.CREATE, "chat/1317");
           throw err;
@@ -237,17 +317,38 @@ export default function App() {
       sessionStorage.setItem("chat_uid", uid);
 
       // 3. Verify if the selected username is already connected under a different session/UID
-      const isAlreadyConnected = Object.entries(members).some(
+      const existingSession = Object.entries(members).find(
         ([mUid, mName]) => mName === username && mUid !== uid
       );
-      if (isAlreadyConnected) {
-        return "This account is already active.";
+
+      if (existingSession) {
+        const [existingUid] = existingSession;
+        const lastSeenTime = lastSeenMap[username];
+        const isStale = lastSeenTime ? (Date.now() - lastSeenTime > 60000) : true;
+
+        if (isStale) {
+          // Stale session detected! Automatically consider dead, remove from Firestore, and allow the login
+          try {
+            await updateDoc(chatRef, {
+              [`members.${existingUid}`]: deleteField(),
+              [`lastSeen.${username}`]: deleteField()
+            });
+            // Update local structures to allow immediate flow
+            delete members[existingUid];
+            delete lastSeenMap[username];
+          } catch (err) {
+            console.error("Cleanup of stale session failed:", err);
+          }
+        } else {
+          return "This account is already active.";
+        }
       }
 
       // 4. Update members list
       try {
         await updateDoc(chatRef, {
-          [`members.${uid}`]: username
+          [`members.${uid}`]: username,
+          [`lastSeen.${username}`]: Date.now()
         });
       } catch (err) {
         handleFirestoreError(err, OperationType.UPDATE, "chat/1317");
@@ -288,6 +389,7 @@ export default function App() {
       className="min-h-screen w-full flex justify-center transition-all duration-300 relative select-none font-sans" 
       style={{ backgroundColor: themeConfig.bg, color: themeConfig.text }}
     >
+      {currentTheme === "cat" && view === "home" && <CatBackground theme={themeConfig} />}
       <div className="w-full max-w-[420px] min-h-screen px-4 flex flex-col justify-between py-6">
         
         {/* TOP THEME TOGGLE / SECURITY BADGE IN HOMEPAGE */}
@@ -338,6 +440,9 @@ export default function App() {
                   sessionToken={sessionToken}
                   nickname={nickname}
                   onLeave={() => triggerLogout(false)}
+                  registerUnsubscribe={(unsub) => {
+                    unsubscribesRef.current.push(unsub);
+                  }}
                 />
               </motion.div>
             )}

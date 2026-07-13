@@ -10,7 +10,8 @@ export default function ThemeSelector({ currentTheme, onThemeChange }: ThemeSele
   const options: { value: ThemeType; label: string; tooltip: string }[] = [
     { value: "dark", label: "🌙", tooltip: "Dark Theme" },
     { value: "light", label: "☀️", tooltip: "Light Theme" },
-    { value: "pink", label: "🌸", tooltip: "Pink Theme" }
+    { value: "pink", label: "🌸", tooltip: "Pink Theme" },
+    { value: "cat", label: "🐈", tooltip: "Cat Theme" }
   ];
 
   const config = themes[currentTheme];

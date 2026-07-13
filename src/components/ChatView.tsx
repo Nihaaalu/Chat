@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ThemeConfig } from "../theme.js";
 import { ThemeType, MessageType } from "../types.js";
-import { ArrowLeft, RefreshCw, Send, Users, ShieldAlert } from "lucide-react";
+import { ArrowLeft, RefreshCw, Send, Users, ShieldAlert, X, CornerUpLeft } from "lucide-react";
 import { collection, doc, query, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebase.js";
 import ThemeSelector from "./ThemeSelector.js";
+import MessageCard from "./MessageCard.js";
 
 interface ChatViewProps {
   theme: ThemeConfig;
@@ -15,6 +16,7 @@ interface ChatViewProps {
   sessionToken: string;
   nickname: string;
   onLeave: () => void;
+  registerUnsubscribe: (unsub: () => void) => void;
 }
 
 export default function ChatView({
@@ -24,15 +26,36 @@ export default function ChatView({
   roomCode,
   sessionToken,
   nickname,
-  onLeave
+  onLeave,
+  registerUnsubscribe
 }: ChatViewProps) {
   const [messages, setMessages] = useState<MessageType[]>([]);
   const [participants, setParticipants] = useState<{ id: string; name: string; joinedAt: string }[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [connected, setConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<MessageType | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (replyingTo) {
+      inputRef.current?.focus();
+    }
+  }, [replyingTo]);
+
+  const handleReplyHeaderClick = (replyToId: string) => {
+    setHighlightedMessageId(replyToId);
+    const el = document.getElementById(`msg-${replyToId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    setTimeout(() => {
+      setHighlightedMessageId(null);
+    }, 1500);
+  };
 
   const scrollToBottom = () => {
     setTimeout(() => {
@@ -84,7 +107,8 @@ export default function ChatView({
           content: data.text || "",
           createdAt: data.timestamp 
             ? (data.timestamp.toDate ? data.timestamp.toDate().toISOString() : new Date(data.timestamp).toISOString()) 
-            : new Date().toISOString()
+            : new Date().toISOString(),
+          replyToMessageId: data.replyToMessageId || undefined
         });
       });
       setMessages(msgs);
@@ -94,11 +118,14 @@ export default function ChatView({
       handleFirestoreError(err, OperationType.GET, `chat/${roomCode}/messages`);
     });
 
+    registerUnsubscribe(unsubscribeRoom);
+    registerUnsubscribe(unsubscribeMessages);
+
     return () => {
       unsubscribeRoom();
       unsubscribeMessages();
     };
-  }, [roomCode, onLeave]);
+  }, [roomCode, onLeave, registerUnsubscribe]);
 
   // Manual message pull (Refresh button)
   const handleRefresh = async () => {
@@ -124,7 +151,8 @@ export default function ChatView({
           content: data.text || "",
           createdAt: data.timestamp 
             ? (data.timestamp.toDate ? data.timestamp.toDate().toISOString() : new Date(data.timestamp).toISOString()) 
-            : new Date().toISOString()
+            : new Date().toISOString(),
+          replyToMessageId: data.replyToMessageId || undefined
         });
       });
       setMessages(msgs);
@@ -144,14 +172,23 @@ export default function ChatView({
     const text = inputValue.trim();
     setInputValue("");
 
+    const replyToId = replyingTo?.id;
+    if (replyingTo) {
+      setReplyingTo(null);
+    }
+
     try {
       const messagesRef = collection(db, "chat", roomCode, "messages");
+      const messageDoc: Record<string, any> = {
+        sender: nickname,
+        text: text,
+        timestamp: serverTimestamp()
+      };
+      if (replyToId) {
+        messageDoc.replyToMessageId = replyToId;
+      }
       try {
-        await addDoc(messagesRef, {
-          sender: nickname,
-          text: text,
-          timestamp: serverTimestamp()
-        });
+        await addDoc(messagesRef, messageDoc);
       } catch (err) {
         handleFirestoreError(err, OperationType.CREATE, `chat/${roomCode}/messages`);
         throw err;
@@ -171,7 +208,41 @@ export default function ChatView({
   };
 
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col min-h-screen relative overflow-hidden">
+      {currentThemeType === "cat" && (
+        <div className="absolute inset-0 pointer-events-none overflow-hidden select-none z-0">
+          {/* Subtle static paw print watermark 1 */}
+          <div className="absolute left-[10%] top-[25%]" style={{ color: theme.border, opacity: 0.035 }}>
+            <svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8,14 C6,14 4.5,12.5 4.5,10.5 C4.5,9.5 5.5,8.5 8,8.5 C10.5,8.5 11.5,9.5 11.5,10.5 C11.5,12.5 10,14 8,14 Z" />
+              <circle cx="4" cy="6" r="1.5" />
+              <circle cx="6.5" cy="4" r="1.5" />
+              <circle cx="9.5" cy="4" r="1.5" />
+              <circle cx="12" cy="6" r="1.5" />
+            </svg>
+          </div>
+          {/* Subtle static paw print watermark 2 */}
+          <div className="absolute right-[15%] top-[50%]" style={{ color: theme.border, opacity: 0.035 }}>
+            <svg width="60" height="60" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8,14 C6,14 4.5,12.5 4.5,10.5 C4.5,9.5 5.5,8.5 8,8.5 C10.5,8.5 11.5,9.5 11.5,10.5 C11.5,12.5 10,14 8,14 Z" />
+              <circle cx="4" cy="6" r="1.5" />
+              <circle cx="6.5" cy="4" r="1.5" />
+              <circle cx="9.5" cy="4" r="1.5" />
+              <circle cx="12" cy="6" r="1.5" />
+            </svg>
+          </div>
+          {/* Subtle static paw print watermark 3 */}
+          <div className="absolute left-[12%] top-[75%]" style={{ color: theme.border, opacity: 0.035 }}>
+            <svg width="40" height="40" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8,14 C6,14 4.5,12.5 4.5,10.5 C4.5,9.5 5.5,8.5 8,8.5 C10.5,8.5 11.5,9.5 11.5,10.5 C11.5,12.5 10,14 8,14 Z" />
+              <circle cx="4" cy="6" r="1.5" />
+              <circle cx="6.5" cy="4" r="1.5" />
+              <circle cx="9.5" cy="4" r="1.5" />
+              <circle cx="12" cy="6" r="1.5" />
+            </svg>
+          </div>
+        </div>
+      )}
       {/* HEADER TOP BAR */}
       <header 
         className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[420px] h-16 px-4 flex items-center justify-between border-b z-20 transition-colors duration-300"
@@ -189,7 +260,8 @@ export default function ChatView({
 
         {/* Room Code Display */}
         <div className="flex flex-col items-center">
-          <span className="text-[10px] font-bold uppercase tracking-wider opacity-40" style={{ color: theme.text }}>
+          <span className="text-[10px] font-bold uppercase tracking-wider opacity-40 flex items-center gap-1" style={{ color: theme.text }}>
+            {currentThemeType === "cat" && <span className="text-xs">🐈</span>}
             Secure Vault
           </span>
           <span className="text-sm font-mono font-bold tracking-widest pl-1" style={{ color: theme.text }}>
@@ -289,43 +361,18 @@ export default function ChatView({
                   );
                 }
 
-                const isMe = msg.sender === nickname;
-
                 return (
-                  <motion.div
+                  <MessageCard
                     key={msg.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    className="p-4 rounded-2xl border transition-all duration-300"
-                    style={{
-                      borderColor: isMe ? `${theme.accent}30` : theme.border,
-                      backgroundColor: isMe ? `${theme.accent}05` : theme.card,
-                      marginLeft: isMe ? "2rem" : "0",
-                      marginRight: isMe ? "0" : "2rem"
-                    }}
-                  >
-                    {/* Card Header: Sender Name & Time */}
-                    <div className="flex items-baseline justify-between mb-2">
-                      <span 
-                        className="text-xs font-black uppercase tracking-wider"
-                        style={{ color: isMe ? theme.accent : theme.text }}
-                      >
-                        {msg.sender}
-                      </span>
-                      <span className="text-[10px] font-mono opacity-40 pl-2" style={{ color: theme.text }}>
-                        {formatTime(msg.createdAt)}
-                      </span>
-                    </div>
-
-                    {/* Card Body: Message */}
-                    <p 
-                      className="text-sm leading-relaxed break-words whitespace-pre-wrap selection:bg-slate-300"
-                      style={{ color: theme.text }}
-                    >
-                      {msg.content}
-                    </p>
-                  </motion.div>
+                    msg={msg}
+                    allMessages={messages}
+                    nickname={nickname}
+                    theme={theme}
+                    onReply={(targetMsg) => setReplyingTo(targetMsg)}
+                    onReplyHeaderClick={handleReplyHeaderClick}
+                    isHighlighted={highlightedMessageId === msg.id}
+                    formatTime={formatTime}
+                  />
                 );
               })}
             </AnimatePresence>
@@ -336,11 +383,54 @@ export default function ChatView({
 
       {/* BOTTOM INPUT FOOTER */}
       <footer 
-        className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[420px] px-4 pb-5 pt-3 z-20 border-t transition-colors duration-300"
+        className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[420px] px-4 pb-5 pt-3 z-20 border-t transition-colors duration-300 flex flex-col gap-2"
         style={{ borderColor: theme.border, backgroundColor: theme.bg }}
       >
+        <AnimatePresence initial={false}>
+          {replyingTo && (
+            <motion.div
+              initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+              animate={{ opacity: 1, height: "auto", marginBottom: 4 }}
+              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+              className="overflow-hidden"
+            >
+              <div 
+                className="p-3 rounded-2xl border flex items-start justify-between gap-3 text-xs"
+                style={{
+                  borderColor: theme.border,
+                  backgroundColor: `${theme.card}bf`,
+                  backdropFilter: "blur(4px)"
+                }}
+              >
+                <div className="flex-1 min-w-0 flex items-start gap-2">
+                  <CornerUpLeft className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: theme.accent }} />
+                  <div className="min-w-0">
+                    <div className="font-black uppercase tracking-wider text-[10px]" style={{ color: theme.accent }}>
+                      Replying to {replyingTo.sender}
+                    </div>
+                    <p className="opacity-70 truncate max-w-full text-xs" style={{ color: theme.text }}>
+                      {replyingTo.content.length > 80 
+                        ? replyingTo.content.substring(0, 80) + "..." 
+                        : replyingTo.content}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReplyingTo(null)}
+                  className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                  style={{ color: theme.textSecondary }}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <form onSubmit={handleSendMessage} className="flex items-center gap-2">
           <input
+            ref={inputRef}
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}

@@ -41,5 +41,15 @@ export const themes: Record<ThemeType, ThemeConfig> = {
     textSecondary: "#aa7788",
     shadow: "shadow-[0_8px_30px_rgb(255,212,225,0.3)]",
     inputBg: "#fff9fb"
+  },
+  cat: {
+    bg: "#FFF8F2",
+    card: "#FFFFFF",
+    border: "#F5D7A1",
+    accent: "#F59E0B",
+    text: "#2B2B2B",
+    textSecondary: "#8B7E74",
+    shadow: "shadow-[0_8px_30px_rgba(245,215,161,0.25)]",
+    inputBg: "#FFFBF7"
   }
 };

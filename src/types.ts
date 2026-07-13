@@ -1,4 +1,4 @@
-export type ThemeType = 'dark' | 'light' | 'pink';
+export type ThemeType = 'dark' | 'light' | 'pink' | 'cat';
 
 export interface MessageType {
   id: string;
@@ -6,6 +6,7 @@ export interface MessageType {
   sender: string;
   content: string;
   createdAt: string; // ISO string for client
+  replyToMessageId?: string;
 }
 
 export interface ParticipantType {
