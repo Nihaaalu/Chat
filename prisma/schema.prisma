@@ -1,0 +1,35 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Room {
+  code         String        @id
+  createdAt    DateTime      @default(now())
+  messages     Message[]
+  participants Participant[]
+}
+
+model Participant {
+  id           String   @id @default(uuid())
+  name         String
+  roomCode     String
+  room         Room     @relation(fields: [roomCode], references: [code], onDelete: Cascade)
+  sessionToken String   @unique
+  socketId     String?
+  joinedAt     DateTime @default(now())
+  lastActive   DateTime @default(now())
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  roomCode  String
+  room      Room     @relation(fields: [roomCode], references: [code], onDelete: Cascade)
+  sender    String
+  content   String
+  createdAt DateTime @default(now())
+}

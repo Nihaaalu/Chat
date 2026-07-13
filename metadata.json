@@ -1,0 +1,6 @@
+{
+  "name": "Private Chat",
+  "description": "Secure temporary mobile-first one-to-one conversation vault.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
