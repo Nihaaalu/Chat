@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from "motion/react";
 import { ThemeConfig } from "../theme.js";
 import { ThemeType, MessageType } from "../types.js";
 import { ArrowLeft, RefreshCw, Send, Users, ShieldAlert } from "lucide-react";
-import { io, Socket } from "socket.io-client";
+import { collection, doc, query, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs } from "firebase/firestore";
+import { db, handleFirestoreError, OperationType } from "../lib/firebase.js";
 import ThemeSelector from "./ThemeSelector.js";
 
 interface ChatViewProps {
@@ -31,89 +32,7 @@ export default function ChatView({
   const [connected, setConnected] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const socketRef = useRef<Socket | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
-
-  // Initialize Socket.IO connection
-  useEffect(() => {
-    // Connect to the same host/port
-    const socket = io({
-      autoConnect: true,
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000
-    });
-
-    socketRef.current = socket;
-
-    socket.on("connect", () => {
-      setConnected(true);
-      // Join Room
-      socket.emit("join-room", { roomCode, sessionToken });
-    });
-
-    socket.on("disconnect", () => {
-      setConnected(false);
-    });
-
-    // Room state event (on joining, receives messages + active users)
-    socket.on("room-state", ({ messages: initialMessages, participants: currentParticipants }) => {
-      setMessages(initialMessages);
-      setParticipants(currentParticipants);
-      scrollToBottom();
-    });
-
-    // Receive a single message
-    socket.on("message", (msg: MessageType) => {
-      setMessages((prev) => {
-        // Prevent duplicate messages
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        return [...prev, msg];
-      });
-      scrollToBottom();
-    });
-
-    // Participant joined
-    socket.on("participant-joined", (participant) => {
-      setParticipants((prev) => {
-        if (prev.some((p) => p.id === participant.id)) return prev;
-        return [...prev, participant];
-      });
-    });
-
-    // Participant left
-    socket.on("participant-left", ({ name, reason }) => {
-      setParticipants((prev) => prev.filter((p) => p.name !== name));
-      
-      // Post system info notice in the messages
-      const systemMsg: MessageType = {
-        id: `sys-${Date.now()}`,
-        roomCode,
-        sender: "SYSTEM",
-        content: `${name} has left the room${reason === "inactivity" ? " due to inactivity" : ""}.`,
-        createdAt: new Date().toISOString()
-      };
-      setMessages((prev) => [...prev, systemMsg]);
-      scrollToBottom();
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, [roomCode, sessionToken]);
-
-  // Handle Tab hidden & heartbeat sync
-  useEffect(() => {
-    const handleHeartbeat = () => {
-      if (socketRef.current && socketRef.current.connected) {
-        socketRef.current.emit("heartbeat", { sessionToken });
-      }
-    };
-
-    // Keep active session alive on server while tab is focused
-    const interval = setInterval(handleHeartbeat, 15000);
-    return () => clearInterval(interval);
-  }, [sessionToken]);
 
   const scrollToBottom = () => {
     setTimeout(() => {
@@ -121,40 +40,124 @@ export default function ChatView({
     }, 100);
   };
 
+  // Set up Firebase listeners
+  useEffect(() => {
+    if (!roomCode) return;
+
+    // 1. Listen to active room document for participant updates
+    const roomRef = doc(db, "rooms", roomCode);
+    const unsubscribeRoom = onSnapshot(roomRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        // Room was deleted or expired
+        onLeave();
+        return;
+      }
+
+      const data = snapshot.data();
+      const membersList = data.members || [];
+      
+      // Map members array to visual participants structure
+      setParticipants(membersList.map((name: string) => ({
+        id: name,
+        name: name,
+        joinedAt: new Date().toISOString()
+      })));
+      setConnected(true);
+    }, (err) => {
+      console.error("Room document snapshot error:", err);
+      handleFirestoreError(err, OperationType.GET, `rooms/${roomCode}`);
+    });
+
+    // 2. Listen to real-time messages subcollection
+    const messagesRef = collection(db, "rooms", roomCode, "messages");
+    const q = query(messagesRef, orderBy("timestamp", "asc"));
+    
+    const unsubscribeMessages = onSnapshot(q, (snapshot) => {
+      const msgs: MessageType[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        msgs.push({
+          id: docSnap.id,
+          roomCode,
+          sender: data.sender || "SYSTEM",
+          content: data.text || "",
+          createdAt: data.timestamp 
+            ? (data.timestamp.toDate ? data.timestamp.toDate().toISOString() : new Date(data.timestamp).toISOString()) 
+            : new Date().toISOString()
+        });
+      });
+      setMessages(msgs);
+      scrollToBottom();
+    }, (err) => {
+      console.error("Messages subcollection snapshot error:", err);
+      handleFirestoreError(err, OperationType.GET, `rooms/${roomCode}/messages`);
+    });
+
+    return () => {
+      unsubscribeRoom();
+      unsubscribeMessages();
+    };
+  }, [roomCode, onLeave]);
+
   // Manual message pull (Refresh button)
   const handleRefresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      const res = await fetch("/api/room/messages", {
-        headers: {
-          "Authorization": `Bearer ${sessionToken}`
-        }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMessages(data.messages);
-        scrollToBottom();
+      const messagesRef = collection(db, "rooms", roomCode, "messages");
+      const q = query(messagesRef, orderBy("timestamp", "asc"));
+      let snapshot;
+      try {
+        snapshot = await getDocs(q);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, `rooms/${roomCode}/messages`);
+        throw err;
       }
+      const msgs: MessageType[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        msgs.push({
+          id: docSnap.id,
+          roomCode,
+          sender: data.sender || "SYSTEM",
+          content: data.text || "",
+          createdAt: data.timestamp 
+            ? (data.timestamp.toDate ? data.timestamp.toDate().toISOString() : new Date(data.timestamp).toISOString()) 
+            : new Date().toISOString()
+        });
+      });
+      setMessages(msgs);
+      scrollToBottom();
     } catch (err) {
-      console.error("Refresh messages failed:", err);
+      console.error("Manual refresh messages failed:", err);
     } finally {
       setTimeout(() => setRefreshing(false), 500);
     }
   };
 
-  // Send message
-  const handleSendMessage = (e?: React.FormEvent) => {
+  // Send message to Firestore
+  const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!inputValue.trim() || !socketRef.current) return;
+    if (!inputValue.trim()) return;
 
-    socketRef.current.emit("send-message", {
-      roomCode,
-      sessionToken,
-      content: inputValue
-    });
-
+    const text = inputValue.trim();
     setInputValue("");
+
+    try {
+      const messagesRef = collection(db, "rooms", roomCode, "messages");
+      try {
+        await addDoc(messagesRef, {
+          sender: nickname,
+          text: text,
+          timestamp: serverTimestamp()
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `rooms/${roomCode}/messages`);
+        throw err;
+      }
+    } catch (err) {
+      console.error("Failed to add message:", err);
+    }
   };
 
   const formatTime = (isoString: string) => {

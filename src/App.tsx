@@ -8,6 +8,8 @@ import JoinRoomView from "./components/JoinRoomView.js";
 import ChatView from "./components/ChatView.js";
 import ThemeSelector from "./components/ThemeSelector.js";
 import { Shield, ShieldCheck, X } from "lucide-react";
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, addDoc, serverTimestamp, Timestamp } from "firebase/firestore";
+import { db, handleFirestoreError, OperationType } from "./lib/firebase.js";
 
 export default function App() {
   // 1. Theme State
@@ -50,24 +52,28 @@ export default function App() {
 
       if (savedToken && savedRoom && savedNick) {
         try {
-          const res = await fetch("/api/room/session", {
-            headers: {
-              "Authorization": `Bearer ${savedToken}`
-            }
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            setSessionToken(data.sessionToken);
-            setRoomCode(data.roomCode);
-            setNickname(data.name);
-            setView("chat");
-          } else {
-            // Token stale
-            sessionStorage.clear();
+          const roomRef = doc(db, "rooms", savedRoom);
+          let snap;
+          try {
+            snap = await getDoc(roomRef);
+          } catch (err) {
+            handleFirestoreError(err, OperationType.GET, `rooms/${savedRoom}`);
+            throw err;
           }
+          if (snap.exists()) {
+            const data = snap.data();
+            const members = data.members || [];
+            if (members.includes(savedNick)) {
+              setSessionToken(savedToken);
+              setRoomCode(savedRoom);
+              setNickname(savedNick);
+              setView("chat");
+              return;
+            }
+          }
+          // If room doesn't exist or we are not in members, clear session
+          sessionStorage.clear();
         } catch (err) {
-          // If offline/server issue, fall back to clearing session or keeping local
           sessionStorage.clear();
         }
       }
@@ -131,19 +137,59 @@ export default function App() {
     };
   }, [view, sessionToken]);
 
-  // Logout Trigger helper
+  // Logout Trigger helper with active document pruning
   const triggerLogout = async (byTabHidden = false) => {
-    const token = sessionStorage.getItem("chat_session_token") || sessionToken;
-    if (token) {
+    const activeCode = sessionStorage.getItem("chat_room_code") || roomCode;
+    const activeNick = sessionStorage.getItem("chat_nickname") || nickname;
+
+    if (activeCode && activeNick) {
       try {
-        await fetch("/api/room/logout", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${token}`
+        const roomRef = doc(db, "rooms", activeCode);
+        let snap;
+        try {
+          snap = await getDoc(roomRef);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.GET, `rooms/${activeCode}`);
+          throw err;
+        }
+        if (snap.exists()) {
+          const data = snap.data();
+          const currentMembers = data.members || [];
+          const updatedMembers = currentMembers.filter((m: string) => m !== activeNick);
+
+          if (updatedMembers.length === 0) {
+            // Delete room completely if no participants left
+            try {
+              await deleteDoc(roomRef);
+            } catch (err) {
+              handleFirestoreError(err, OperationType.DELETE, `rooms/${activeCode}`);
+              throw err;
+            }
+          } else {
+            // Update members list and insert left alert message
+            try {
+              await updateDoc(roomRef, {
+                members: updatedMembers
+              });
+            } catch (err) {
+              handleFirestoreError(err, OperationType.UPDATE, `rooms/${activeCode}`);
+              throw err;
+            }
+            const messagesRef = collection(db, "rooms", activeCode, "messages");
+            try {
+              await addDoc(messagesRef, {
+                sender: "SYSTEM",
+                text: `${activeNick} has left the room${byTabHidden ? " due to tab inactivity" : ""}.`,
+                timestamp: serverTimestamp()
+              });
+            } catch (err) {
+              handleFirestoreError(err, OperationType.CREATE, `rooms/${activeCode}/messages`);
+              throw err;
+            }
           }
-        });
+        }
       } catch (err) {
-        // Ignore network errors
+        console.error("Logout cleanup failed:", err);
       }
     }
 
@@ -163,48 +209,152 @@ export default function App() {
   // 6. User Action Handlers
   const handleCreateRoom = async () => {
     try {
-      const res = await fetch("/api/room/create", { method: "POST" });
-      if (res.ok) {
-        const data = await res.json();
-        setCreatedRoomCode(data.code);
-        setView("create");
-      } else {
-        alert("Failed to generate room code. Please try again.");
+      let code = "";
+      let isUnique = false;
+      let attempts = 0;
+
+      while (!isUnique && attempts < 10) {
+        attempts++;
+        code = Math.floor(1000 + Math.random() * 9000).toString();
+        const roomRef = doc(db, "rooms", code);
+        let snap;
+        try {
+          snap = await getDoc(roomRef);
+        } catch (err) {
+          handleFirestoreError(err, OperationType.GET, `rooms/${code}`);
+          throw err;
+        }
+        if (!snap.exists()) {
+          isUnique = true;
+        }
       }
+
+      if (!isUnique) {
+        alert("Failed to generate a unique room code. Please try again.");
+        return;
+      }
+
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days expiration
+
+      const roomRef = doc(db, "rooms", code);
+      try {
+        await setDoc(roomRef, {
+          createdAt: serverTimestamp(),
+          expiresAt: Timestamp.fromDate(expiresAt),
+          members: [],
+          createdBy: ""
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `rooms/${code}`);
+        throw err;
+      }
+
+      setCreatedRoomCode(code);
+      setView("create");
     } catch (err) {
+      console.error("Failed to generate room:", err);
       alert("Error contacting security service.");
     }
   };
 
   const handleJoinRoom = async (code: string, name: string): Promise<string | void> => {
     try {
-      const currentToken = sessionStorage.getItem("chat_session_token") || "";
-      const res = await fetch("/api/room/join", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": currentToken ? `Bearer ${currentToken}` : ""
-        },
-        body: JSON.stringify({ code, name })
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        return data.error || "An unexpected error occurred.";
+      const roomRef = doc(db, "rooms", code);
+      let snap;
+      try {
+        snap = await getDoc(roomRef);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, `rooms/${code}`);
+        throw err;
       }
 
-      // Persist in sessionStorage (never localStorage!)
-      sessionStorage.setItem("chat_session_token", data.sessionToken);
-      sessionStorage.setItem("chat_room_code", data.roomCode);
-      sessionStorage.setItem("chat_nickname", data.name);
+      if (!snap.exists()) {
+        return "Invalid room code. Please check and try again.";
+      }
 
-      setSessionToken(data.sessionToken);
-      setRoomCode(data.roomCode);
-      setNickname(data.name);
+      const data = snap.data();
+      
+      // Check expiration
+      const expiresAt = data.expiresAt;
+      if (expiresAt) {
+        const expireDate = expiresAt.toDate ? expiresAt.toDate() : new Date(expiresAt);
+        if (expireDate < new Date()) {
+          try {
+            await deleteDoc(roomRef);
+          } catch (err) {
+            handleFirestoreError(err, OperationType.DELETE, `rooms/${code}`);
+            throw err;
+          }
+          return "This room has expired.";
+        }
+      }
+
+      const currentMembers: string[] = data.members || [];
+
+      // Check room fullness
+      if (currentMembers.length >= 2 && !currentMembers.includes(name)) {
+        return "Room is full. Only 2 participants are allowed.";
+      }
+
+      // Check duplicate nickname
+      if (currentMembers.includes(name)) {
+        // If they already joined, let them back in
+        const restoredToken = name + "-" + code;
+        sessionStorage.setItem("chat_session_token", restoredToken);
+        sessionStorage.setItem("chat_room_code", code);
+        sessionStorage.setItem("chat_nickname", name);
+
+        setSessionToken(restoredToken);
+        setRoomCode(code);
+        setNickname(name);
+        setView("chat");
+        return;
+      }
+
+      // Add to members list
+      const updatedMembers = [...currentMembers, name];
+      const updates: any = {
+        members: updatedMembers
+      };
+      if (!data.createdBy) {
+        updates.createdBy = name;
+      }
+
+      try {
+        await updateDoc(roomRef, updates);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `rooms/${code}`);
+        throw err;
+      }
+
+      // Post SYSTEM join notification
+      const messagesRef = collection(db, "rooms", code, "messages");
+      try {
+        await addDoc(messagesRef, {
+          sender: "SYSTEM",
+          text: `${name} has joined the room.`,
+          timestamp: serverTimestamp()
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, `rooms/${code}/messages`);
+        throw err;
+      }
+
+      const generatedToken = name + "-" + code + "-" + Math.random().toString(36).substring(2, 7);
+
+      // Persist in sessionStorage (never localStorage!)
+      sessionStorage.setItem("chat_session_token", generatedToken);
+      sessionStorage.setItem("chat_room_code", code);
+      sessionStorage.setItem("chat_nickname", name);
+
+      setSessionToken(generatedToken);
+      setRoomCode(code);
+      setNickname(name);
       setView("chat");
     } catch (err) {
-      return "Network error. Please try again.";
+      console.error("Join room failed:", err);
+      return "Network error joining room. Please try again.";
     }
   };
 
