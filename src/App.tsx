@@ -1,14 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { ThemeType } from "./types.js";
 import { themes } from "./theme.js";
 import HomeView from "./components/HomeView.js";
-import CreateRoomView from "./components/CreateRoomView.js";
-import JoinRoomView from "./components/JoinRoomView.js";
 import ChatView from "./components/ChatView.js";
 import ThemeSelector from "./components/ThemeSelector.js";
 import { Shield, ShieldCheck, X } from "lucide-react";
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, addDoc, serverTimestamp, Timestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, deleteField } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "./lib/firebase.js";
 
 export default function App() {
@@ -25,20 +23,27 @@ export default function App() {
 
   const themeConfig = themes[currentTheme];
 
-  // 2. Active Session States (Strictly sessionStorage - cleared on tab close)
-  const [view, setView] = useState<"home" | "create" | "join" | "chat">("home");
+  // 2. Active Session States (sessionStorage only)
+  const [view, setView] = useState<"home" | "chat">("home");
   const [roomCode, setRoomCode] = useState("");
   const [nickname, setNickname] = useState("");
   const [sessionToken, setSessionToken] = useState("");
 
-  // Prefill helper for join form when coming from Create view
-  const [prefilledCode, setPrefilledCode] = useState("");
-
-  // Temporary container for newly generated room code
-  const [createdRoomCode, setCreatedRoomCode] = useState("");
-
   // Custom visual overlay for security logouts
   const [securityNotice, setSecurityNotice] = useState<string | null>(null);
+
+  // Warning banner for grace period return
+  const [gracePeriodBanner, setGracePeriodBanner] = useState<string | null>(null);
+
+  // Auto-dismiss the grace period warning banner after 6 seconds
+  useEffect(() => {
+    if (gracePeriodBanner) {
+      const timer = setTimeout(() => {
+        setGracePeriodBanner(null);
+      }, 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [gracePeriodBanner]);
 
   // Security references for timeouts
   const tabTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -49,29 +54,29 @@ export default function App() {
       const savedToken = sessionStorage.getItem("chat_session_token");
       const savedRoom = sessionStorage.getItem("chat_room_code");
       const savedNick = sessionStorage.getItem("chat_nickname");
+      const savedUid = sessionStorage.getItem("chat_uid");
 
-      if (savedToken && savedRoom && savedNick) {
+      if (savedToken && savedRoom === "1317" && savedNick && savedUid) {
         try {
-          const roomRef = doc(db, "rooms", savedRoom);
+          const chatRef = doc(db, "chat", "1317");
           let snap;
           try {
-            snap = await getDoc(roomRef);
+            snap = await getDoc(chatRef);
           } catch (err) {
-            handleFirestoreError(err, OperationType.GET, `rooms/${savedRoom}`);
+            handleFirestoreError(err, OperationType.GET, "chat/1317");
             throw err;
           }
           if (snap.exists()) {
             const data = snap.data();
-            const members = data.members || [];
-            if (members.includes(savedNick)) {
+            const members = data.members || {};
+            if (members[savedUid] === savedNick) {
               setSessionToken(savedToken);
-              setRoomCode(savedRoom);
+              setRoomCode("1317");
               setNickname(savedNick);
               setView("chat");
               return;
             }
           }
-          // If room doesn't exist or we are not in members, clear session
           sessionStorage.clear();
         } catch (err) {
           sessionStorage.clear();
@@ -82,21 +87,22 @@ export default function App() {
     restoreSession();
   }, []);
 
-  // 4. SECURITY FEATURE 1: Tab Hidden Countdown (20 seconds)
+  // 4. SECURITY FEATURE 1: Tab Hidden Countdown (30 seconds)
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
         if (view === "chat" && sessionToken) {
-          // Trigger logout if away for 20 seconds
+          // Trigger logout if away for 30 seconds
           tabTimeoutRef.current = setTimeout(() => {
             triggerLogout(true);
-          }, 20000);
+          }, 30000);
         }
       } else {
         // Tab is active again, clear timeout
         if (tabTimeoutRef.current) {
           clearTimeout(tabTimeoutRef.current);
           tabTimeoutRef.current = null;
+          setGracePeriodBanner("Session preserved. You returned before the 30-second privacy timeout.");
         }
       }
     };
@@ -126,7 +132,6 @@ export default function App() {
       window.addEventListener(event, resetInactivityTimer);
     });
 
-    // Initial run
     resetInactivityTimer();
 
     return () => {
@@ -137,56 +142,49 @@ export default function App() {
     };
   }, [view, sessionToken]);
 
-  // Logout Trigger helper with active document pruning
+  // 6. Cleanup presence on tab/page close
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const uid = sessionStorage.getItem("chat_uid");
+      if (uid && view === "chat") {
+        const chatRef = doc(db, "chat", "1317");
+        // Fire-and-forget Firestore updates are standard on browser close attempts
+        updateDoc(chatRef, {
+          [`members.${uid}`]: deleteField()
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [view]);
+
+  // Logout Trigger helper with active presence pruning
   const triggerLogout = async (byTabHidden = false) => {
-    const activeCode = sessionStorage.getItem("chat_room_code") || roomCode;
     const activeNick = sessionStorage.getItem("chat_nickname") || nickname;
+    const uid = sessionStorage.getItem("chat_uid");
 
-    if (activeCode && activeNick) {
+    if (uid) {
       try {
-        const roomRef = doc(db, "rooms", activeCode);
-        let snap;
+        const chatRef = doc(db, "chat", "1317");
         try {
-          snap = await getDoc(roomRef);
+          await updateDoc(chatRef, {
+            [`members.${uid}`]: deleteField()
+          });
         } catch (err) {
-          handleFirestoreError(err, OperationType.GET, `rooms/${activeCode}`);
-          throw err;
+          handleFirestoreError(err, OperationType.UPDATE, "chat/1317");
         }
-        if (snap.exists()) {
-          const data = snap.data();
-          const currentMembers = data.members || [];
-          const updatedMembers = currentMembers.filter((m: string) => m !== activeNick);
 
-          if (updatedMembers.length === 0) {
-            // Delete room completely if no participants left
-            try {
-              await deleteDoc(roomRef);
-            } catch (err) {
-              handleFirestoreError(err, OperationType.DELETE, `rooms/${activeCode}`);
-              throw err;
-            }
-          } else {
-            // Update members list and insert left alert message
-            try {
-              await updateDoc(roomRef, {
-                members: updatedMembers
-              });
-            } catch (err) {
-              handleFirestoreError(err, OperationType.UPDATE, `rooms/${activeCode}`);
-              throw err;
-            }
-            const messagesRef = collection(db, "rooms", activeCode, "messages");
-            try {
-              await addDoc(messagesRef, {
-                sender: "SYSTEM",
-                text: `${activeNick} has left the room${byTabHidden ? " due to tab inactivity" : ""}.`,
-                timestamp: serverTimestamp()
-              });
-            } catch (err) {
-              handleFirestoreError(err, OperationType.CREATE, `rooms/${activeCode}/messages`);
-              throw err;
-            }
-          }
+        const messagesRef = collection(db, "chat", "1317", "messages");
+        try {
+          await addDoc(messagesRef, {
+            sender: "SYSTEM",
+            text: `${activeNick} has left the room${byTabHidden ? " due to tab inactivity" : ""}.`,
+            timestamp: serverTimestamp()
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, "chat/1317/messages");
         }
       } catch (err) {
         console.error("Logout cleanup failed:", err);
@@ -200,167 +198,89 @@ export default function App() {
     setView("home");
 
     if (byTabHidden) {
-      setSecurityNotice("You have been automatically logged out to preserve your privacy after leaving the browser tab for over 20 seconds.");
+      setSecurityNotice("You have been automatically logged out to preserve your privacy after leaving the browser tab for over 30 seconds.");
     } else {
       setSecurityNotice("You have been logged out automatically due to 30 minutes of inactivity.");
     }
   };
 
-  // 6. User Action Handlers
-  const handleCreateRoom = async () => {
+  const handleJoinRoom = async (code: string, username: string, password: string): Promise<string | void> => {
     try {
-      let code = "";
-      let isUnique = false;
-      let attempts = 0;
-
-      while (!isUnique && attempts < 10) {
-        attempts++;
-        code = Math.floor(1000 + Math.random() * 9000).toString();
-        const roomRef = doc(db, "rooms", code);
-        let snap;
-        try {
-          snap = await getDoc(roomRef);
-        } catch (err) {
-          handleFirestoreError(err, OperationType.GET, `rooms/${code}`);
-          throw err;
-        }
-        if (!snap.exists()) {
-          isUnique = true;
-        }
+      // 1. Verify room credentials using the fixed allowed accounts
+      if (code !== "1317" || !((username === "user1" && password === "user1") || (username === "user2" && password === "user2"))) {
+        return "Invalid credentials.";
       }
 
-      if (!isUnique) {
-        alert("Failed to generate a unique room code. Please try again.");
-        return;
-      }
-
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days expiration
-
-      const roomRef = doc(db, "rooms", code);
-      try {
-        await setDoc(roomRef, {
-          createdAt: serverTimestamp(),
-          expiresAt: Timestamp.fromDate(expiresAt),
-          members: [],
-          createdBy: ""
-        });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.CREATE, `rooms/${code}`);
-        throw err;
-      }
-
-      setCreatedRoomCode(code);
-      setView("create");
-    } catch (err) {
-      console.error("Failed to generate room:", err);
-      alert("Error contacting security service.");
-    }
-  };
-
-  const handleJoinRoom = async (code: string, name: string): Promise<string | void> => {
-    try {
-      const roomRef = doc(db, "rooms", code);
+      // 2. Fetch the room document
+      const chatRef = doc(db, "chat", "1317");
       let snap;
       try {
-        snap = await getDoc(roomRef);
+        snap = await getDoc(chatRef);
       } catch (err) {
-        handleFirestoreError(err, OperationType.GET, `rooms/${code}`);
+        handleFirestoreError(err, OperationType.GET, "chat/1317");
         throw err;
       }
 
-      if (!snap.exists()) {
-        return "Invalid room code. Please check and try again.";
-      }
-
-      const data = snap.data();
-      
-      // Check expiration
-      const expiresAt = data.expiresAt;
-      if (expiresAt) {
-        const expireDate = expiresAt.toDate ? expiresAt.toDate() : new Date(expiresAt);
-        if (expireDate < new Date()) {
-          try {
-            await deleteDoc(roomRef);
-          } catch (err) {
-            handleFirestoreError(err, OperationType.DELETE, `rooms/${code}`);
-            throw err;
-          }
-          return "This room has expired.";
+      let members: Record<string, string> = {};
+      if (snap.exists()) {
+        members = snap.data().members || {};
+      } else {
+        try {
+          await setDoc(chatRef, { members: {} });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, "chat/1317");
+          throw err;
         }
       }
 
-      const currentMembers: string[] = data.members || [];
+      const uid = sessionStorage.getItem("chat_uid") || "uid-" + Math.random().toString(36).substring(2, 15);
+      sessionStorage.setItem("chat_uid", uid);
 
-      // Check room fullness
-      if (currentMembers.length >= 2 && !currentMembers.includes(name)) {
-        return "Room is full. Only 2 participants are allowed.";
+      // 3. Verify if the selected username is already connected under a different session/UID
+      const isAlreadyConnected = Object.entries(members).some(
+        ([mUid, mName]) => mName === username && mUid !== uid
+      );
+      if (isAlreadyConnected) {
+        return "This account is already active.";
       }
 
-      // Check duplicate nickname
-      if (currentMembers.includes(name)) {
-        // If they already joined, let them back in
-        const restoredToken = name + "-" + code;
-        sessionStorage.setItem("chat_session_token", restoredToken);
-        sessionStorage.setItem("chat_room_code", code);
-        sessionStorage.setItem("chat_nickname", name);
-
-        setSessionToken(restoredToken);
-        setRoomCode(code);
-        setNickname(name);
-        setView("chat");
-        return;
-      }
-
-      // Add to members list
-      const updatedMembers = [...currentMembers, name];
-      const updates: any = {
-        members: updatedMembers
-      };
-      if (!data.createdBy) {
-        updates.createdBy = name;
-      }
-
+      // 4. Update members list
       try {
-        await updateDoc(roomRef, updates);
+        await updateDoc(chatRef, {
+          [`members.${uid}`]: username
+        });
       } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `rooms/${code}`);
+        handleFirestoreError(err, OperationType.UPDATE, "chat/1317");
         throw err;
       }
 
-      // Post SYSTEM join notification
-      const messagesRef = collection(db, "rooms", code, "messages");
+      // 5. Post SYSTEM join notification
+      const messagesRef = collection(db, "chat", "1317", "messages");
       try {
         await addDoc(messagesRef, {
           sender: "SYSTEM",
-          text: `${name} has joined the room.`,
+          text: `${username} has joined the room.`,
           timestamp: serverTimestamp()
         });
       } catch (err) {
-        handleFirestoreError(err, OperationType.CREATE, `rooms/${code}/messages`);
+        handleFirestoreError(err, OperationType.CREATE, "chat/1317/messages");
         throw err;
       }
 
-      const generatedToken = name + "-" + code + "-" + Math.random().toString(36).substring(2, 7);
+      const generatedToken = username + "-1317-" + Math.random().toString(36).substring(2, 7);
 
-      // Persist in sessionStorage (never localStorage!)
       sessionStorage.setItem("chat_session_token", generatedToken);
-      sessionStorage.setItem("chat_room_code", code);
-      sessionStorage.setItem("chat_nickname", name);
+      sessionStorage.setItem("chat_room_code", "1317");
+      sessionStorage.setItem("chat_nickname", username);
 
       setSessionToken(generatedToken);
-      setRoomCode(code);
-      setNickname(name);
+      setRoomCode("1317");
+      setNickname(username);
       setView("chat");
     } catch (err) {
-      console.error("Join room failed:", err);
-      return "Network error joining room. Please try again.";
+      console.error("Join failed:", err);
+      return "Network error joining chat room.";
     }
-  };
-
-  const handleGoToJoin = (prefill = "") => {
-    setPrefilledCode(prefill);
-    setView("join");
   };
 
   return (
@@ -370,7 +290,7 @@ export default function App() {
     >
       <div className="w-full max-w-[420px] min-h-screen px-4 flex flex-col justify-between py-6">
         
-        {/* TOP THEME TOGGLE / SECURITY BADGE IN HOMEPAGE/CREATE/JOIN */}
+        {/* TOP THEME TOGGLE / SECURITY BADGE IN HOMEPAGE */}
         {view !== "chat" && (
           <header className="flex items-center justify-between h-12 mb-4">
             <div className="flex items-center gap-1.5 opacity-60">
@@ -396,41 +316,6 @@ export default function App() {
               >
                 <HomeView
                   theme={themeConfig}
-                  onCreateRoomClick={handleCreateRoom}
-                  onJoinRoomClick={() => handleGoToJoin("")}
-                />
-              </motion.div>
-            )}
-
-            {view === "create" && (
-              <motion.div
-                key="create"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-                transition={{ duration: 0.2 }}
-              >
-                <CreateRoomView
-                  theme={themeConfig}
-                  roomCode={createdRoomCode}
-                  onBack={() => setView("home")}
-                  onJoinWithCode={(code) => handleGoToJoin(code)}
-                />
-              </motion.div>
-            )}
-
-            {view === "join" && (
-              <motion.div
-                key="join"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-                transition={{ duration: 0.2 }}
-              >
-                <JoinRoomView
-                  theme={themeConfig}
-                  prefilledCode={prefilledCode}
-                  onBack={() => setView("home")}
                   onJoin={handleJoinRoom}
                 />
               </motion.div>
@@ -459,7 +344,7 @@ export default function App() {
           </AnimatePresence>
         </div>
 
-        {/* MINIMAL FOOTER FOR HOMEPAGE/CREATE/JOIN */}
+        {/* MINIMAL FOOTER FOR HOMEPAGE */}
         {view !== "chat" && (
           <footer className="text-center mt-8 py-2">
             <span className="text-[10px] opacity-25 font-mono tracking-widest pl-1">
@@ -468,6 +353,37 @@ export default function App() {
           </footer>
         )}
       </div>
+
+      {/* GRACE PERIOD BANNER */}
+      <AnimatePresence>
+        {gracePeriodBanner && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-[380px] p-4 rounded-2xl border flex items-center justify-between gap-3 shadow-lg z-50 transition-colors duration-300"
+            style={{
+              borderColor: themeConfig.border,
+              backgroundColor: themeConfig.card,
+              color: themeConfig.text
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 flex-shrink-0" style={{ color: themeConfig.accent }} />
+              <p className="text-xs font-semibold leading-relaxed">
+                {gracePeriodBanner}
+              </p>
+            </div>
+            <button
+              onClick={() => setGracePeriodBanner(null)}
+              className="p-1 rounded-full opacity-60 hover:opacity-100 transition-colors cursor-pointer"
+              style={{ color: themeConfig.text }}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* RE-ENTRY / SECURITY NOTIFICATION OVERLAY */}
       <AnimatePresence>

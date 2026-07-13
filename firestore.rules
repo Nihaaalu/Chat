@@ -1,20 +1,25 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Rooms collection rules
-    match /rooms/{roomCode} {
-      // Anyone can create a room, read it to check its state, or update it to join/leave
-      allow read, create: if true;
-      allow update: if request.resource.data.members.size() <= 2;
-      
-      // Allow deletion only if room is empty or being cleaned up
-      allow delete: if true;
+    // Default-deny catch-all safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
 
-      // Messages subcollection rules
+    // Config security document for passphrase hashing
+    match /config/security {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if false;
+    }
+
+    // Chat document room code "1317"
+    match /chat/{roomCode} {
+      allow read, write: if roomCode == "1317";
+
+      // Subcollection messages
       match /messages/{messageId} {
-        // Anyone in the room can read and write messages
-        allow read, write: if true;
+        allow read, write: if roomCode == "1317";
       }
     }
   }

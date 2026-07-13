@@ -1,14 +1,54 @@
+import React, { useState } from "react";
 import { motion } from "motion/react";
 import { ThemeConfig } from "../theme.js";
-import { MessageSquare, Plus, ArrowRight } from "lucide-react";
+import { MessageSquare, Key, User, LogIn, Lock } from "lucide-react";
 
 interface HomeViewProps {
   theme: ThemeConfig;
-  onCreateRoomClick: () => void;
-  onJoinRoomClick: () => void;
+  onJoin: (code: string, username: string, password: string) => Promise<string | void>;
 }
 
-export default function HomeView({ theme, onCreateRoomClick, onJoinRoomClick }: HomeViewProps) {
+export default function HomeView({ theme, onJoin }: HomeViewProps) {
+  const [code, setCode] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    const cleanCode = code.trim();
+    const cleanUsername = username.trim();
+    const cleanPassword = password.trim();
+
+    if (!cleanCode) {
+      setError("Please enter the room code.");
+      return;
+    }
+    if (!cleanUsername) {
+      setError("Please enter the username.");
+      return;
+    }
+    if (!cleanPassword) {
+      setError("Please enter the password.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const errMsg = await onJoin(cleanCode, cleanUsername, cleanPassword);
+      if (errMsg) {
+        setError(errMsg);
+      }
+    } catch (err: any) {
+      setError(err?.message || "An unexpected connection error occurred.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center min-h-[70vh] px-4">
       {/* Visual Icon Header */}
@@ -27,7 +67,7 @@ export default function HomeView({ theme, onCreateRoomClick, onJoinRoomClick }: 
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.5, delay: 0.1, ease: "easeOut" }}
-        className="text-center mb-12"
+        className="text-center mb-8"
       >
         <h1 
           className="text-3xl font-extrabold tracking-widest uppercase mb-3"
@@ -43,54 +83,150 @@ export default function HomeView({ theme, onCreateRoomClick, onJoinRoomClick }: 
         </p>
       </motion.div>
 
-      {/* Buttons Block */}
-      <motion.div
+      {/* Form */}
+      <motion.form 
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
-        className="flex flex-col gap-4 w-full"
+        onSubmit={handleSubmit} 
+        className="flex flex-col gap-5 w-full max-w-sm"
       >
-        {/* Create Room Button */}
-        <button
-          onClick={onCreateRoomClick}
-          className="w-full h-14 rounded-full flex items-center justify-center gap-2 font-medium tracking-wide transition-all duration-300 cursor-pointer select-none border"
-          style={{
-            borderColor: theme.border,
-            backgroundColor: theme.card,
-            color: theme.text
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = `${theme.accent}08`;
-            e.currentTarget.style.borderColor = theme.accent;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = theme.card;
-            e.currentTarget.style.borderColor = theme.border;
-          }}
-        >
-          <Plus className="w-5 h-5" style={{ color: theme.accent }} />
-          Create Room
-        </button>
+        {/* Room Code */}
+        <div className="flex flex-col gap-2">
+          <label className="text-xs font-semibold uppercase tracking-wider pl-1" style={{ color: theme.textSecondary }}>
+            Room Code
+          </label>
+          <div className="relative">
+            <Key 
+              className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 opacity-40"
+              style={{ color: theme.text }}
+            />
+            <input
+              type="text"
+              maxLength={4}
+              value={code}
+              onChange={(e) => {
+                setError("");
+                setCode(e.target.value.replace(/\D/g, ""));
+              }}
+              placeholder="0000"
+              disabled={loading}
+              className="w-full h-12 pl-12 pr-4 rounded-xl text-center font-mono text-xl tracking-[0.2em] font-bold border transition-all duration-300 outline-none"
+              style={{
+                borderColor: theme.border,
+                backgroundColor: theme.inputBg,
+                color: theme.text
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = theme.accent;
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = theme.border;
+              }}
+            />
+          </div>
+        </div>
 
-        {/* Join Room Button */}
+        {/* Username */}
+        <div className="flex flex-col gap-2">
+          <label className="text-xs font-semibold uppercase tracking-wider pl-1" style={{ color: theme.textSecondary }}>
+            Username
+          </label>
+          <div className="relative">
+            <User 
+              className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 opacity-40"
+              style={{ color: theme.text }}
+            />
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => {
+                setError("");
+                setUsername(e.target.value);
+              }}
+              placeholder="Enter username"
+              disabled={loading}
+              className="w-full h-12 pl-12 pr-4 rounded-xl text-sm border transition-all duration-300 outline-none"
+              style={{
+                borderColor: theme.border,
+                backgroundColor: theme.inputBg,
+                color: theme.text
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = theme.accent;
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = theme.border;
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Password */}
+        <div className="flex flex-col gap-2">
+          <label className="text-xs font-semibold uppercase tracking-wider pl-1" style={{ color: theme.textSecondary }}>
+            Password
+          </label>
+          <div className="relative">
+            <Lock 
+              className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 opacity-40"
+              style={{ color: theme.text }}
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setError("");
+                setPassword(e.target.value);
+              }}
+              placeholder="Enter password"
+              disabled={loading}
+              className="w-full h-12 pl-12 pr-4 rounded-xl text-sm border transition-all duration-300 outline-none"
+              style={{
+                borderColor: theme.border,
+                backgroundColor: theme.inputBg,
+                color: theme.text
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = theme.accent;
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = theme.border;
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Error Message */}
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-xs font-medium p-3 rounded-lg border text-center leading-normal"
+            style={{
+              borderColor: "#fca5a5",
+              backgroundColor: "#fef2f2",
+              color: "#b91c1c"
+            }}
+          >
+            {error}
+          </motion.div>
+        )}
+
+        {/* Join button */}
         <button
-          onClick={onJoinRoomClick}
-          className="w-full h-14 rounded-full flex items-center justify-center gap-2 font-semibold tracking-wide transition-all duration-300 cursor-pointer select-none"
+          type="submit"
+          disabled={loading}
+          className="w-full h-12 rounded-full flex items-center justify-center gap-2 font-semibold tracking-wide transition-all duration-300 cursor-pointer select-none mt-2 disabled:opacity-50"
           style={{
             backgroundColor: theme.accent,
-            color: "#ffffff" // Always contrast with dark/light/pink accent colors
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.filter = "brightness(0.9)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.filter = "none";
+            color: "#ffffff"
           }}
         >
-          Join Room
-          <ArrowRight className="w-5 h-5" />
+          <LogIn className="w-5 h-5" />
+          {loading ? "Connecting..." : "Join Chat"}
         </button>
-      </motion.div>
+      </motion.form>
     </div>
   );
 }

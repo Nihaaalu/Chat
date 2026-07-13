@@ -45,31 +45,32 @@ export default function ChatView({
     if (!roomCode) return;
 
     // 1. Listen to active room document for participant updates
-    const roomRef = doc(db, "rooms", roomCode);
+    const roomRef = doc(db, "chat", roomCode);
     const unsubscribeRoom = onSnapshot(roomRef, (snapshot) => {
       if (!snapshot.exists()) {
-        // Room was deleted or expired
-        onLeave();
+        // Room doesn't exist yet, we will stay in the session and wait
         return;
       }
 
       const data = snapshot.data();
-      const membersList = data.members || [];
+      const membersMap = data.members || {};
       
-      // Map members array to visual participants structure
-      setParticipants(membersList.map((name: string) => ({
-        id: name,
-        name: name,
+      // Map members map (uid -> name) to visual participants structure
+      const membersList = Object.entries(membersMap).map(([uid, name]) => ({
+        id: uid,
+        name: name as string,
         joinedAt: new Date().toISOString()
-      })));
+      }));
+
+      setParticipants(membersList);
       setConnected(true);
     }, (err) => {
       console.error("Room document snapshot error:", err);
-      handleFirestoreError(err, OperationType.GET, `rooms/${roomCode}`);
+      handleFirestoreError(err, OperationType.GET, `chat/${roomCode}`);
     });
 
     // 2. Listen to real-time messages subcollection
-    const messagesRef = collection(db, "rooms", roomCode, "messages");
+    const messagesRef = collection(db, "chat", roomCode, "messages");
     const q = query(messagesRef, orderBy("timestamp", "asc"));
     
     const unsubscribeMessages = onSnapshot(q, (snapshot) => {
@@ -90,7 +91,7 @@ export default function ChatView({
       scrollToBottom();
     }, (err) => {
       console.error("Messages subcollection snapshot error:", err);
-      handleFirestoreError(err, OperationType.GET, `rooms/${roomCode}/messages`);
+      handleFirestoreError(err, OperationType.GET, `chat/${roomCode}/messages`);
     });
 
     return () => {
@@ -104,13 +105,13 @@ export default function ChatView({
     if (refreshing) return;
     setRefreshing(true);
     try {
-      const messagesRef = collection(db, "rooms", roomCode, "messages");
+      const messagesRef = collection(db, "chat", roomCode, "messages");
       const q = query(messagesRef, orderBy("timestamp", "asc"));
       let snapshot;
       try {
         snapshot = await getDocs(q);
       } catch (err) {
-        handleFirestoreError(err, OperationType.GET, `rooms/${roomCode}/messages`);
+        handleFirestoreError(err, OperationType.GET, `chat/${roomCode}/messages`);
         throw err;
       }
       const msgs: MessageType[] = [];
@@ -144,7 +145,7 @@ export default function ChatView({
     setInputValue("");
 
     try {
-      const messagesRef = collection(db, "rooms", roomCode, "messages");
+      const messagesRef = collection(db, "chat", roomCode, "messages");
       try {
         await addDoc(messagesRef, {
           sender: nickname,
@@ -152,7 +153,7 @@ export default function ChatView({
           timestamp: serverTimestamp()
         });
       } catch (err) {
-        handleFirestoreError(err, OperationType.CREATE, `rooms/${roomCode}/messages`);
+        handleFirestoreError(err, OperationType.CREATE, `chat/${roomCode}/messages`);
         throw err;
       }
     } catch (err) {

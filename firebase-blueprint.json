@@ -1,0 +1,65 @@
+{
+  "entities": {
+    "ChatRoom": {
+      "title": "Chat Room",
+      "description": "Represents the permanent private chat room",
+      "type": "object",
+      "properties": {
+        "members": {
+          "type": "object",
+          "description": "Map of active user IDs to their usernames (user1 or user2)"
+        }
+      },
+      "required": ["members"]
+    },
+    "ChatMessage": {
+      "title": "Chat Message",
+      "description": "A single message in the chat room",
+      "type": "object",
+      "properties": {
+        "sender": {
+          "type": "string",
+          "description": "The sender username (user1, user2, or SYSTEM)",
+          "maxLength": 50
+        },
+        "text": {
+          "type": "string",
+          "description": "The message body text",
+          "maxLength": 5000
+        },
+        "timestamp": {
+          "type": "object",
+          "description": "Firestore server timestamp of when the message was sent"
+        }
+      },
+      "required": ["sender", "text", "timestamp"]
+    },
+    "SecurityConfig": {
+      "title": "Security Configuration",
+      "description": "Stores the SHA-256 hash of the passphrase for secure login",
+      "type": "object",
+      "properties": {
+        "passphraseHash": {
+          "type": "string",
+          "description": "The SHA-256 hash of the passphrase",
+          "maxLength": 64
+        }
+      },
+      "required": ["passphraseHash"]
+    }
+  },
+  "firestore": {
+    "/chat/{roomCode}": {
+      "schema": "ChatRoom",
+      "description": "Access point for the chat room"
+    },
+    "/chat/{roomCode}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Messages subcollection"
+    },
+    "/config/security": {
+      "schema": "SecurityConfig",
+      "description": "Security config for comparing passphrase hashes"
+    }
+  }
+}
