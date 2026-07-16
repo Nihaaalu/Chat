@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ThemeType } from "./types.js";
 import { themes } from "./theme.js";
@@ -35,6 +35,33 @@ export default function App() {
 
   // Warning banner for grace period return
   const [gracePeriodBanner, setGracePeriodBanner] = useState<string | null>(null);
+
+  // Dynamic Viewport Height for mobile keyboard resilience
+  const [viewportHeight, setViewportHeight] = useState<string>("100vh");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    
+    const updateHeight = () => {
+      if (window.visualViewport) {
+        setViewportHeight(`${window.visualViewport.height}px`);
+      } else {
+        setViewportHeight(`${window.innerHeight}px`);
+      }
+    };
+    
+    updateHeight();
+    
+    window.visualViewport?.addEventListener("resize", updateHeight);
+    window.visualViewport?.addEventListener("scroll", updateHeight);
+    window.addEventListener("resize", updateHeight);
+    
+    return () => {
+      window.visualViewport?.removeEventListener("resize", updateHeight);
+      window.visualViewport?.removeEventListener("scroll", updateHeight);
+      window.removeEventListener("resize", updateHeight);
+    };
+  }, []);
 
   // Auto-dismiss the grace period warning banner after 6 seconds
   useEffect(() => {
@@ -192,31 +219,46 @@ export default function App() {
     };
   }, [view, nickname]);
 
-  // 7. Heartbeat: update lastSeen field every 15 seconds while user is logged in
+  // 7. Presence: update lastSeen field ONLY on login, logout, disconnect, and reconnect
   useEffect(() => {
     if (view !== "chat" || !nickname) return;
 
     const uid = sessionStorage.getItem("chat_uid");
     if (!uid) return;
 
-    const sendHeartbeat = async () => {
+    const updatePresence = async (status: "online" | "offline") => {
       try {
         const chatRef = doc(db, "chat", "1317");
-        await updateDoc(chatRef, {
-          [`lastSeen.${nickname}`]: Date.now()
-        });
+        if (status === "online") {
+          console.log(`[Firestore Write] Presence - updateDoc (online) on chat/1317 for ${nickname}`);
+          await updateDoc(chatRef, {
+            [`lastSeen.${nickname}`]: Date.now(),
+            [`members.${uid}`]: nickname
+          });
+        } else {
+          console.log(`[Firestore Write] Presence - updateDoc (offline) on chat/1317 for ${nickname}`);
+          await updateDoc(chatRef, {
+            [`lastSeen.${nickname}`]: deleteField(),
+            [`members.${uid}`]: deleteField()
+          });
+        }
       } catch (err) {
-        console.error("Heartbeat failed:", err);
+        console.error("Presence update failed:", err);
       }
     };
 
-    // Initial heartbeat immediately upon entering
-    sendHeartbeat();
+    // Set online status immediately upon entering the chat
+    updatePresence("online");
 
-    const interval = setInterval(sendHeartbeat, 15000);
+    const handleOnline = () => updatePresence("online");
+    const handleOffline = () => updatePresence("offline");
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
 
     return () => {
-      clearInterval(interval);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
     };
   }, [view, nickname]);
 
@@ -388,13 +430,24 @@ export default function App() {
     }
   };
 
+  const handleLeaveCallback = useCallback(() => {
+    triggerLogout(false);
+  }, [nickname]);
+
+  const registerUnsubscribeCallback = useCallback((unsub: () => void) => {
+    unsubscribesRef.current.push(unsub);
+  }, []);
+
   return (
     <div 
-      className="min-h-screen w-full flex justify-center transition-all duration-300 relative select-none font-sans" 
+      className="min-h-screen w-full flex justify-center transition-all duration-300 relative select-none font-sans mobile-no-scrollbar" 
       style={{ backgroundColor: themeConfig.bg, color: themeConfig.text }}
     >
       {currentTheme === "cat" && view === "home" && <CatBackground theme={themeConfig} />}
-      <div className={`w-full max-w-[420px] flex flex-col ${view === "chat" ? "h-screen overflow-hidden" : "min-h-screen px-4 justify-between py-6"}`}>
+      <div 
+        className={`w-full max-w-[420px] flex flex-col mobile-no-scrollbar ${view === "chat" ? "overflow-hidden" : "h-screen max-md:h-dvh px-4 justify-between py-6 overflow-y-auto"}`}
+        style={{ height: view === "chat" ? viewportHeight : undefined }}
+      >
         
         {/* TOP THEME TOGGLE / SECURITY BADGE IN HOMEPAGE */}
         {view !== "chat" && (
@@ -443,10 +496,8 @@ export default function App() {
                   roomCode={roomCode}
                   sessionToken={sessionToken}
                   nickname={nickname}
-                  onLeave={() => triggerLogout(false)}
-                  registerUnsubscribe={(unsub) => {
-                    unsubscribesRef.current.push(unsub);
-                  }}
+                  onLeave={handleLeaveCallback}
+                  registerUnsubscribe={registerUnsubscribeCallback}
                 />
               </motion.div>
             )}

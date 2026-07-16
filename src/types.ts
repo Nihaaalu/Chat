@@ -7,6 +7,10 @@ export interface MessageType {
   content: string;
   createdAt: string; // ISO string for client
   replyToMessageId?: string;
+  reactions?: Record<string, string[]>;
+  status?: 'sent' | 'delivered' | 'read';
+  isDeleted?: boolean;
+  isEdited?: boolean;
 }
 
 export interface ParticipantType {

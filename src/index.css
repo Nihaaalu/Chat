@@ -52,3 +52,18 @@
 .cat-zzz-3 {
   animation: cat-zzz 3.5s infinite ease-in-out 2.4s;
 }
+
+/* Hide scrollbar on mobile devices (<768px) */
+@media (max-width: 767px) {
+  .mobile-no-scrollbar::-webkit-scrollbar,
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    display: none !important;
+  }
+  .mobile-no-scrollbar,
+  html,
+  body {
+    -ms-overflow-style: none !important; /* IE and Edge */
+    scrollbar-width: none !important; /* Firefox */
+  }
+}

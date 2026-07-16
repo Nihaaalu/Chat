@@ -72,7 +72,7 @@ export default function HomeView({ theme, onJoin }: HomeViewProps) {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[70vh] px-4">
+    <div className="flex flex-col items-center justify-center min-h-[65vh] max-md:min-h-0 px-4">
       {/* Visual Icon Header */}
       <motion.div
         initial={{ scale: 0.8, opacity: 0 }}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ThemeConfig } from "../theme.js";
 import { ThemeType, MessageType } from "../types.js";
-import { ArrowLeft, RefreshCw, Send, Users, ShieldAlert, X, CornerUpLeft, Settings, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, RefreshCw, Send, Users, ShieldAlert, X, CornerUpLeft, Settings, Volume2, VolumeX, Search, ChevronUp, ChevronDown, Pin, PinOff, Edit3 } from "lucide-react";
 
 // Synthesizes a high-fidelity, subtle dual-tone chime using Web Audio API (perfectly self-contained)
 const playNotificationSound = () => {
@@ -107,7 +107,7 @@ const SleepingCatIllustration = () => (
   </div>
 );
 
-import { collection, doc, query, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs } from "firebase/firestore";
+import { collection, doc, query, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs, updateDoc } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebase.js";
 import ThemeSelector from "./ThemeSelector.js";
 import MessageCard from "./MessageCard.js";
@@ -197,6 +197,323 @@ export default function ChatView({
   const [inputFocused, setInputFocused] = useState(false);
   const [activeMicroAnimation, setActiveMicroAnimation] = useState<"paw" | "blink" | null>(null);
 
+  // 1. Toast notifications state
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((curr) => (curr === msg ? null : curr));
+    }, 2500);
+  };
+
+  // 2. Settings States
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    try {
+      return localStorage.getItem("chat_sound_enabled") !== "false";
+    } catch (e) {
+      return true;
+    }
+  });
+
+  const soundEnabledRef = useRef(soundEnabled);
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+    localStorage.setItem("chat_sound_enabled", soundEnabled ? "true" : "false");
+  }, [soundEnabled]);
+
+  const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(() => {
+    try {
+      return localStorage.getItem("chat_browser_notifications") !== "false";
+    } catch (e) {
+      return true;
+    }
+  });
+
+  const [fontSize, setFontSize] = useState<'small' | 'medium' | 'large'>(() => {
+    try {
+      return (localStorage.getItem("chat_font_size") as 'small' | 'medium' | 'large') || 'medium';
+    } catch (e) {
+      return 'medium';
+    }
+  });
+
+  const [compactMode, setCompactMode] = useState(() => {
+    try {
+      return localStorage.getItem("chat_compact_mode") === "true";
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const [showTimestamps, setShowTimestamps] = useState(() => {
+    try {
+      return localStorage.getItem("chat_show_timestamps") !== "false";
+    } catch (e) {
+      return true;
+    }
+  });
+
+  const browserNotificationsEnabledRef = useRef(browserNotificationsEnabled);
+  useEffect(() => {
+    browserNotificationsEnabledRef.current = browserNotificationsEnabled;
+    localStorage.setItem("chat_browser_notifications", browserNotificationsEnabled ? "true" : "false");
+  }, [browserNotificationsEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem("chat_font_size", fontSize);
+  }, [fontSize]);
+
+  useEffect(() => {
+    localStorage.setItem("chat_compact_mode", compactMode ? "true" : "false");
+  }, [compactMode]);
+
+  useEffect(() => {
+    localStorage.setItem("chat_show_timestamps", showTimestamps ? "true" : "false");
+  }, [showTimestamps]);
+
+  const handleClearLocalCache = () => {
+    try {
+      localStorage.clear();
+      setSoundEnabled(true);
+      setBrowserNotificationsEnabled(true);
+      setFontSize('medium');
+      setCompactMode(false);
+      setShowTimestamps(true);
+      setDeletedForMeIds([]);
+      showToast("Local cache cleared successfully!");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // 3. Typing indicator state & functions
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastTypingStateRef = useRef(false);
+
+  const updateTypingState = async (isTyping: boolean) => {
+    if (lastTypingStateRef.current === isTyping) return;
+    lastTypingStateRef.current = isTyping;
+    try {
+      const roomRef = doc(db, "chat", roomCode);
+      console.log(`[Firestore Write] updateTypingState - updateDoc (typing state) on chat/${roomCode} for ${nickname} isTyping=${isTyping}`);
+      await updateDoc(roomRef, {
+        [`typing.${nickname}`]: isTyping
+      });
+    } catch (err) {
+      console.error("Failed to update typing state:", err);
+    }
+  };
+
+  const handleInputValueChange = (val: string) => {
+    setInputValue(val);
+    if (!val.trim()) {
+      updateTypingState(false);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    } else {
+      updateTypingState(true);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      typingTimeoutRef.current = setTimeout(() => {
+        updateTypingState(false);
+      }, 2000);
+    }
+  };
+
+  // 4. Pinned Message States
+  const [pinnedMessageId, setPinnedMessageId] = useState<string | null>(null);
+
+  const handlePinMessage = async (msg: MessageType) => {
+    try {
+      const roomRef = doc(db, "chat", roomCode);
+      console.log(`[Firestore Write] handlePinMessage - updateDoc (pin message) on chat/${roomCode} pinnedMessageId=${msg.id}`);
+      await updateDoc(roomRef, {
+        pinnedMessageId: msg.id
+      });
+      showToast("Message pinned!");
+    } catch (err) {
+      console.error("Failed to pin message:", err);
+    }
+  };
+
+  const handleUnpinMessage = async () => {
+    try {
+      const roomRef = doc(db, "chat", roomCode);
+      console.log(`[Firestore Write] handleUnpinMessage - updateDoc (unpin message) on chat/${roomCode} pinnedMessageId=null`);
+      await updateDoc(roomRef, {
+        pinnedMessageId: null
+      });
+      showToast("Message unpinned!");
+    } catch (err) {
+      console.error("Failed to unpin message:", err);
+    }
+  };
+
+  // 5. Delete Message State (Delete for me)
+  const [deletedForMeIds, setDeletedForMeIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(`chat_deleted_for_me_${roomCode}_${nickname}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const handleDeleteMessage = async (msgId: string, forEveryone: boolean) => {
+    if (forEveryone) {
+      try {
+        const docRef = doc(db, "chat", roomCode, "messages", msgId);
+        console.log(`[Firestore Write] handleDeleteMessage - updateDoc (delete for everyone) on chat/${roomCode}/messages/${msgId}`);
+        await updateDoc(docRef, {
+          text: "This message was deleted.",
+          isDeleted: true
+        });
+        showToast("Deleted for everyone");
+      } catch (err) {
+        console.error("Failed to delete for everyone:", err);
+      }
+    } else {
+      const nextDeleted = [...deletedForMeIds, msgId];
+      setDeletedForMeIds(nextDeleted);
+      localStorage.setItem(`chat_deleted_for_me_${roomCode}_${nickname}`, JSON.stringify(nextDeleted));
+      showToast("Deleted for me");
+    }
+  };
+
+  // 6. Edit Message State
+  const [editingMessage, setEditingMessage] = useState<MessageType | null>(null);
+
+  const handleEditMessage = async (msgId: string, newText: string) => {
+    try {
+      const docRef = doc(db, "chat", roomCode, "messages", msgId);
+      console.log(`[Firestore Write] handleEditMessage - updateDoc (edit message) on chat/${roomCode}/messages/${msgId}`);
+      await updateDoc(docRef, {
+        text: newText,
+        isEdited: true
+      });
+      showToast("Message edited!");
+    } catch (err) {
+      console.error("Failed to edit message:", err);
+    }
+  };
+
+  // 7. Search States
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearchBar, setShowSearchBar] = useState(false);
+  const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
+
+  // 8. Jump to latest & Unread visual tracking
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [firstUnreadMsgId, setFirstUnreadMsgId] = useState<string | null>(null);
+  const [showUnreadDivider, setShowUnreadDivider] = useState(false);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    const isAtBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 80;
+    setShowJumpToLatest(!isAtBottom);
+  };
+
+  // Emojis Reactions trigger handler
+  const handleReaction = async (msgId: string, emoji: string) => {
+    try {
+      const docRef = doc(db, "chat", roomCode, "messages", msgId);
+      const targetMsg = messages.find((m) => m.id === msgId);
+      if (!targetMsg) return;
+
+      const currentReactions = targetMsg.reactions || {};
+      const usersWithReaction = currentReactions[emoji] ? [...currentReactions[emoji]] : [];
+
+      let updatedUsers: string[];
+      if (usersWithReaction.includes(nickname)) {
+        updatedUsers = usersWithReaction.filter((u) => u !== nickname);
+      } else {
+        updatedUsers = [...usersWithReaction, nickname];
+      }
+
+      const nextReactions = {
+        ...currentReactions,
+        [emoji]: updatedUsers
+      };
+
+      console.log(`[Firestore Write] handleReaction - updateDoc (reaction update) on chat/${roomCode}/messages/${msgId} reactions:`, nextReactions);
+      await updateDoc(docRef, { reactions: nextReactions });
+    } catch (err) {
+      console.error("Failed to react to message:", err);
+    }
+  };
+
+  const playNotificationSoundLocal = () => {
+    if (soundEnabledRef.current) {
+      playNotificationSound();
+    }
+  };
+
+  // Copy Message
+  const handleCopyMessage = (msg: MessageType) => {
+    try {
+      navigator.clipboard.writeText(msg.content);
+      showToast("Message copied to clipboard!");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Search implementation
+  const matchedMessageIds = React.useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    return messages
+      .filter((m) => !deletedForMeIds.includes(m.id) && !m.isDeleted)
+      .filter((m) => m.content.toLowerCase().includes(searchQuery.toLowerCase()))
+      .map((m) => m.id);
+  }, [messages, searchQuery, deletedForMeIds]);
+
+  const scrollToMatch = (msgId: string) => {
+    const el = document.getElementById(`msg-${msgId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedMessageId(msgId);
+      setTimeout(() => setHighlightedMessageId(null), 1500);
+    }
+  };
+
+  const handleSearchChange = (val: string) => {
+    setSearchQuery(val);
+    if (!val.trim()) {
+      setCurrentSearchIndex(-1);
+    } else {
+      // Find matches
+      const matches = messages
+        .filter((m) => !deletedForMeIds.includes(m.id) && !m.isDeleted)
+        .filter((m) => m.content.toLowerCase().includes(val.toLowerCase()))
+        .map((m) => m.id);
+      
+      if (matches.length > 0) {
+        setCurrentSearchIndex(0);
+        scrollToMatch(matches[0]);
+      } else {
+        setCurrentSearchIndex(-1);
+      }
+    }
+  };
+
+  const handleNextSearchMatch = () => {
+    if (matchedMessageIds.length === 0) return;
+    const nextIdx = (currentSearchIndex + 1) % matchedMessageIds.length;
+    setCurrentSearchIndex(nextIdx);
+    scrollToMatch(matchedMessageIds[nextIdx]);
+  };
+
+  const handlePrevSearchMatch = () => {
+    if (matchedMessageIds.length === 0) return;
+    const prevIdx = (currentSearchIndex - 1 + matchedMessageIds.length) % matchedMessageIds.length;
+    setCurrentSearchIndex(prevIdx);
+    scrollToMatch(matchedMessageIds[prevIdx]);
+  };
+
   // Micro-animations scheduling: randomly every 45-75 seconds
   useEffect(() => {
     if (currentThemeType !== "cat") return;
@@ -224,20 +541,6 @@ export default function ChatView({
       clearTimeout(timer);
     };
   }, [currentThemeType]);
-
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(() => {
-    try {
-      return localStorage.getItem("chat_sound_enabled") !== "false";
-    } catch (e) {
-      return true;
-    }
-  });
-
-  const soundEnabledRef = useRef(soundEnabled);
-  useEffect(() => {
-    soundEnabledRef.current = soundEnabled;
-  }, [soundEnabled]);
 
   // Request notification permission the first time user1 logs in
   useEffect(() => {
@@ -274,15 +577,26 @@ export default function ChatView({
     }, 100);
   };
 
+  // Auto-scroll to bottom when keyboard opens/closes via visual viewport
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+    const handleViewportResize = () => {
+      scrollToBottom();
+    };
+    window.visualViewport.addEventListener("resize", handleViewportResize);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", handleViewportResize);
+    };
+  }, []);
+
   // Set up Firebase listeners
   useEffect(() => {
     if (!roomCode) return;
 
-    // 1. Listen to active room document for participant updates
+    // 1. Listen to active room document for participant updates, pinning and typing indicators
     const roomRef = doc(db, "chat", roomCode);
     const unsubscribeRoom = onSnapshot(roomRef, (snapshot) => {
       if (!snapshot.exists()) {
-        // Room doesn't exist yet, we will stay in the session and wait
         return;
       }
 
@@ -298,6 +612,16 @@ export default function ChatView({
 
       setParticipants(membersList);
       setConnected(true);
+
+      // Set Pinned message and Typing state in real-time
+      setPinnedMessageId(data.pinnedMessageId || null);
+
+      const typingData = data.typing || {};
+      const activeTypers = Object.entries(typingData)
+        .filter(([user, isTyping]) => isTyping && user !== nickname)
+        .map(([user]) => user);
+      setTypingUsers(activeTypers);
+
     }, (err) => {
       console.error("Room document snapshot error:", err);
       handleFirestoreError(err, OperationType.GET, `chat/${roomCode}`);
@@ -320,7 +644,11 @@ export default function ChatView({
           createdAt: data.timestamp 
             ? (data.timestamp.toDate ? data.timestamp.toDate().toISOString() : new Date(data.timestamp).toISOString()) 
             : new Date().toISOString(),
-          replyToMessageId: data.replyToMessageId || undefined
+          replyToMessageId: data.replyToMessageId || undefined,
+          reactions: data.reactions || {},
+          status: data.status || "sent",
+          isDeleted: data.isDeleted || false,
+          isEdited: data.isEdited || false
         });
       });
 
@@ -342,7 +670,7 @@ export default function ChatView({
                 const permissionGranted = "Notification" in window && Notification.permission === "granted";
 
                 // Show browser notification if permitted
-                if (permissionGranted) {
+                if (permissionGranted && browserNotificationsEnabledRef.current) {
                   const title = "Private Chat";
                   const body = `user2:\n${text}`;
                   const iconUrl = document.querySelector("link[rel*='icon']")?.getAttribute("href") || "/favicon.ico";
@@ -361,10 +689,8 @@ export default function ChatView({
                   };
                 }
 
-                // Play subtle tone if enabled and permission is granted
-                if (soundEnabledRef.current && permissionGranted) {
-                  playNotificationSound();
-                }
+                // Play subtle tone
+                playNotificationSoundLocal();
               }
             }
           }
@@ -388,7 +714,39 @@ export default function ChatView({
       unsubscribeRoom();
       unsubscribeMessages();
     };
-  }, [roomCode, onLeave, registerUnsubscribe]);
+  }, [roomCode, onLeave, registerUnsubscribe, nickname]);
+
+  // Session-locked unread check
+  const initialUnreadSetRef = useRef(false);
+  useEffect(() => {
+    if (messages.length > 0 && !initialUnreadSetRef.current) {
+      initialUnreadSetRef.current = true;
+      const lastSeenId = localStorage.getItem(`chat_last_seen_${roomCode}_${nickname}`);
+      if (lastSeenId) {
+        const lastSeenIndex = messages.findIndex(m => m.id === lastSeenId);
+        if (lastSeenIndex !== -1 && lastSeenIndex < messages.length - 1) {
+          const unreadMsgs = messages.slice(lastSeenIndex + 1).filter(m => m.sender !== nickname);
+          if (unreadMsgs.length > 0) {
+            setFirstUnreadMsgId(unreadMsgs[0].id);
+            setShowUnreadDivider(true);
+          }
+        }
+      } else {
+        localStorage.setItem(`chat_last_seen_${roomCode}_${nickname}`, messages[messages.length - 1].id);
+      }
+    }
+  }, [messages, roomCode, nickname]);
+
+  // Remove divider after 5 seconds of active viewing
+  useEffect(() => {
+    if (messages.length > 0 && showUnreadDivider) {
+      const timer = setTimeout(() => {
+        setShowUnreadDivider(false);
+        localStorage.setItem(`chat_last_seen_${roomCode}_${nickname}`, messages[messages.length - 1].id);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [messages, showUnreadDivider, roomCode, nickname]);
 
   // Manual message pull (Refresh button)
   const handleRefresh = async () => {
@@ -415,7 +773,11 @@ export default function ChatView({
           createdAt: data.timestamp 
             ? (data.timestamp.toDate ? data.timestamp.toDate().toISOString() : new Date(data.timestamp).toISOString()) 
             : new Date().toISOString(),
-          replyToMessageId: data.replyToMessageId || undefined
+          replyToMessageId: data.replyToMessageId || undefined,
+          reactions: data.reactions || {},
+          status: data.status || "sent",
+          isDeleted: data.isDeleted || false,
+          isEdited: data.isEdited || false
         });
       });
       const processedMsgs = processFetchedMessages(msgs);
@@ -436,6 +798,19 @@ export default function ChatView({
     const text = inputValue.trim();
     setInputValue("");
 
+    // Clear typing state in Firestore
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    updateTypingState(false);
+
+    // If editing a message, update it instead of adding a new one
+    if (editingMessage) {
+      await handleEditMessage(editingMessage.id, text);
+      setEditingMessage(null);
+      return;
+    }
+
     const replyToId = replyingTo?.id;
     if (replyingTo) {
       setReplyingTo(null);
@@ -446,12 +821,14 @@ export default function ChatView({
       const messageDoc: Record<string, any> = {
         sender: nickname,
         text: text,
-        timestamp: serverTimestamp()
+        timestamp: serverTimestamp(),
+        status: "sent"
       };
       if (replyToId) {
         messageDoc.replyToMessageId = replyToId;
       }
       try {
+        console.log(`[Firestore Write] handleSendMessage - addDoc (new message) on chat/${roomCode}/messages`, messageDoc);
         await addDoc(messagesRef, messageDoc);
       } catch (err) {
         handleFirestoreError(err, OperationType.CREATE, `chat/${roomCode}/messages`);
@@ -548,77 +925,139 @@ export default function ChatView({
 
       {/* HEADER TOP BAR */}
       <header 
-        className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[420px] h-16 px-4 flex items-center justify-between border-b z-20 transition-all duration-300"
+        className="absolute top-0 left-0 w-full h-16 max-md:h-[52px] px-4 flex items-center justify-between border-b z-20 transition-all duration-300"
         style={{ 
           borderColor: theme.border, 
           backgroundColor: theme.bg,
           boxShadow: currentThemeType === "cat" ? "0 2px 14px rgba(139, 126, 116, 0.05)" : "none"
         }}
       >
-        <button
-          onClick={onLeave}
-          className="p-2 -ml-2 rounded-full transition-colors duration-200 cursor-pointer text-sm font-medium flex items-center gap-1 opacity-70 hover:opacity-100"
-          style={{ color: theme.text }}
-          title="Leave Chat"
-        >
-          <ArrowLeft className="w-5 h-5" />
-          <span className="sr-only sm:not-sr-only text-xs">Leave</span>
-        </button>
-
-        {/* Room Code Display */}
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] font-bold uppercase tracking-wider opacity-60 flex items-center gap-1" style={{ color: theme.text }}>
-            {currentThemeType === "cat" ? (
-              <span className="flex items-center gap-1.5 text-amber-800 font-extrabold tracking-widest">
-                <CatSvgLogo className="w-4 h-4 text-amber-600 shrink-0" isBlinking={activeMicroAnimation === "blink"} />
-                Secure Vault
-              </span>
-            ) : "Secure Vault"}
-          </span>
-          <span className="text-sm font-mono font-bold tracking-widest pl-1" style={{ color: theme.text }}>
-            #{roomCode}
-          </span>
-        </div>
-
-        {/* Action Tray */}
-        <div className="flex items-center gap-2">
-          {/* Theme buttons */}
-          <ThemeSelector currentTheme={currentThemeType} onThemeChange={onThemeChange} />
-
-          {/* Settings button - ONLY FOR USER1 */}
-          {nickname === "user1" && (
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-2 rounded-full border transition-all duration-300 cursor-pointer active:scale-90"
-              style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
-              title="Chat Settings"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-          )}
-
-          {/* Manual pull/refresh button */}
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className={`p-2 rounded-full border transition-all duration-300 cursor-pointer ${
-              refreshing && currentThemeType !== "cat" ? "animate-spin" : "active:scale-90"
-            }`}
-            style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
-            title="Refresh Messages"
-          >
-            {refreshing && currentThemeType === "cat" ? (
-              <StaggeredPawLoader />
-            ) : (
-              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+        {showSearchBar ? (
+          <div className="flex-1 flex items-center gap-2 h-full py-2 max-md:py-1">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => handleInputValueChange(e.target.value)} // wait, we want to handle search input value change
+              onInput={(e) => handleSearchChange((e.target as HTMLInputElement).value)}
+              placeholder="Search message text..."
+              className="flex-1 h-10 max-md:h-9 px-3 text-xs outline-none border rounded-xl"
+              style={{
+                borderColor: theme.border,
+                backgroundColor: theme.card,
+                color: theme.text
+              }}
+              autoFocus
+            />
+            {searchQuery.trim() && matchedMessageIds.length > 0 && (
+              <div className="flex items-center gap-1 shrink-0 text-[10px] font-mono opacity-80" style={{ color: theme.textSecondary }}>
+                <span>{currentSearchIndex + 1}/{matchedMessageIds.length}</span>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handlePrevSearchMatch(); }} 
+                  className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-full cursor-pointer shrink-0"
+                  style={{ color: theme.text }}
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </button>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleNextSearchMatch(); }} 
+                  className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-full cursor-pointer shrink-0"
+                  style={{ color: theme.text }}
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+              </div>
             )}
-          </button>
-        </div>
+            <button 
+              onClick={() => {
+                setShowSearchBar(false);
+                setSearchQuery("");
+                setCurrentSearchIndex(-1);
+              }}
+              className="p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-full cursor-pointer shrink-0 max-md:w-11 max-md:h-11 flex items-center justify-center"
+              style={{ color: theme.textSecondary }}
+              title="Close Search"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <>
+            <button
+              onClick={onLeave}
+              className="md:p-2 -ml-2 rounded-full transition-colors duration-200 cursor-pointer text-sm font-medium flex items-center gap-1 opacity-70 hover:opacity-100 max-md:w-11 max-md:h-11 max-md:flex max-md:items-center max-md:justify-center shrink-0"
+              style={{ color: theme.text }}
+              title="Leave Chat"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              <span className="sr-only sm:not-sr-only text-xs">Leave</span>
+            </button>
+
+            {/* Room Code Display */}
+            <div className="flex flex-col items-center">
+              <span className="text-[10px] font-bold uppercase tracking-wider opacity-60 flex items-center gap-1" style={{ color: theme.text }}>
+                {currentThemeType === "cat" ? (
+                  <span className="flex items-center gap-1.5 text-amber-800 font-extrabold tracking-widest">
+                    <CatSvgLogo className="w-4 h-4 text-amber-600 shrink-0" isBlinking={activeMicroAnimation === "blink"} />
+                    Secure Vault
+                  </span>
+                ) : "Secure Vault"}
+              </span>
+              <span className="text-sm font-mono font-bold tracking-widest pl-1" style={{ color: theme.text }}>
+                #{roomCode}
+              </span>
+            </div>
+
+            {/* Action Tray */}
+            <div className="flex items-center gap-1.5 max-md:gap-1">
+              {/* Search button */}
+              <button
+                onClick={() => setShowSearchBar(true)}
+                className="md:p-2 rounded-full border transition-all duration-300 cursor-pointer active:scale-90 max-md:w-11 max-md:h-11 flex items-center justify-center shrink-0"
+                style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
+                title="Search Messages"
+              >
+                <Search className="w-4 h-4" />
+              </button>
+
+              {/* Theme buttons */}
+              <ThemeSelector currentTheme={currentThemeType} onThemeChange={onThemeChange} />
+
+              {/* Settings button - ONLY FOR USER1 */}
+              {nickname === "user1" && (
+                <button
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="md:p-2 rounded-full border transition-all duration-300 cursor-pointer active:scale-90 max-md:w-11 max-md:h-11 flex items-center justify-center shrink-0"
+                  style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
+                  title="Chat Settings"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+              )}
+
+              {/* Manual pull/refresh button */}
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing}
+                className={`md:p-2 rounded-full border transition-all duration-300 cursor-pointer max-md:w-11 max-md:h-11 flex items-center justify-center shrink-0 ${
+                  refreshing && currentThemeType !== "cat" ? "animate-spin" : "active:scale-90"
+                }`}
+                style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
+                title="Refresh Messages"
+              >
+                {refreshing && currentThemeType === "cat" ? (
+                  <StaggeredPawLoader />
+                ) : (
+                  <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+                )}
+              </button>
+            </div>
+          </>
+        )}
       </header>
 
       {/* ACTIVE PARTICIPANTS TRAY */}
       <div 
-        className="mt-20 px-4 py-2 flex items-center justify-between rounded-2xl border text-xs font-medium transition-all duration-300"
+        className="mt-20 max-md:mt-[60px] mx-4 max-md:mx-2 px-4 max-md:px-3 py-2 max-md:py-1.5 flex items-center justify-between rounded-2xl max-md:rounded-xl border text-xs font-medium transition-all duration-300 select-none"
         style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
       >
         <div className="flex items-center gap-1.5 opacity-80">
@@ -646,9 +1085,56 @@ export default function ChatView({
         </div>
       </div>
 
+      {/* PINNED MESSAGE BANNER */}
+      {(() => {
+        const pinnedMsg = messages.find(m => m.id === pinnedMessageId);
+        if (!pinnedMsg || pinnedMsg.isDeleted) return null;
+        
+        const handleJumpToPinned = () => {
+          const el = document.getElementById(`msg-${pinnedMsg.id}`);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            setHighlightedMessageId(pinnedMsg.id);
+            setTimeout(() => setHighlightedMessageId(null), 1500);
+          }
+        };
+
+        return (
+          <div 
+            className="mt-2 mx-4 max-md:mx-2 px-4 max-md:px-3 py-2 max-md:py-1.5 flex items-center justify-between rounded-2xl max-md:rounded-xl border text-xs font-semibold select-none shadow-sm cursor-pointer hover:opacity-95 transition-all active:scale-[0.99]"
+            style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
+            onClick={handleJumpToPinned}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <Pin className="w-3.5 h-3.5 shrink-0" style={{ color: theme.accent }} />
+              <div className="min-w-0 text-left">
+                <span className="text-[9px] font-black uppercase tracking-wider block" style={{ color: theme.accent }}>
+                  Pinned Message (Tap to jump)
+                </span>
+                <span className="opacity-75 truncate max-w-full block font-medium" style={{ color: theme.textSecondary }}>
+                  {pinnedMsg.sender}: {pinnedMsg.content}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleUnpinMessage();
+              }}
+              className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10 shrink-0 transition-colors cursor-pointer"
+              style={{ color: theme.textSecondary }}
+              title="Unpin"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        );
+      })()}
+
       {/* MESSAGE LIST */}
       <main 
-        className={`flex-1 px-1 pt-4 pb-28 ${currentThemeType === "cat" ? "cat-scrollbar" : ""}`}
+        onScroll={handleScroll}
+        className={`flex-1 px-1 pt-4 pb-28 max-md:pb-20 mobile-no-scrollbar ${currentThemeType === "cat" ? "cat-scrollbar" : ""}`}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -698,30 +1184,184 @@ export default function ChatView({
             </div>
           )
         ) : (
-          messages.map((msg) => {
-            return (
-              <MessageCard
-                key={msg.id}
-                msg={msg}
-                allMessages={messages}
-                nickname={nickname}
-                theme={theme}
-                onReply={(targetMsg) => setReplyingTo(targetMsg)}
-                onReplyHeaderClick={handleReplyHeaderClick}
-                isHighlighted={highlightedMessageId === msg.id}
-                formatTime={formatTime}
-              />
-            );
-          })
+          (() => {
+            const visibleMessages = messages.filter(m => !deletedForMeIds.includes(m.id));
+            
+            const getDateSeparatorLabel = (currentDateStr: string, prevDateStr?: string) => {
+              const current = new Date(currentDateStr);
+              const currentYear = current.getFullYear();
+              const currentMonth = current.getMonth();
+              const currentDate = current.getDate();
+
+              if (prevDateStr) {
+                const prev = new Date(prevDateStr);
+                if (
+                  currentYear === prev.getFullYear() &&
+                  currentMonth === prev.getMonth() &&
+                  currentDate === prev.getDate()
+                ) {
+                  return null;
+                }
+              }
+
+              const today = new Date();
+              const yesterday = new Date();
+              yesterday.setDate(today.getDate() - 1);
+
+              if (
+                currentYear === today.getFullYear() &&
+                currentMonth === today.getMonth() &&
+                currentDate === today.getDate()
+              ) {
+                return "Today";
+              } else if (
+                currentYear === yesterday.getFullYear() &&
+                currentMonth === yesterday.getMonth() &&
+                currentDate === yesterday.getDate()
+              ) {
+                return "Yesterday";
+              } else {
+                return current.toLocaleDateString([], { day: "numeric", month: "long", year: "numeric" });
+              }
+            };
+
+            let prevDateStr: string | undefined = undefined;
+
+            return visibleMessages.map((msg) => {
+              const dateLabel = getDateSeparatorLabel(msg.createdAt, prevDateStr);
+              prevDateStr = msg.createdAt;
+
+              const isFirstUnread = showUnreadDivider && msg.id === firstUnreadMsgId;
+
+              return (
+                <div key={msg.id} className="flex flex-col w-full" style={{ gap: "12px" }}>
+                  {dateLabel && (
+                    <div className="flex items-center justify-center my-0.5 select-none w-full" style={{ height: "16px", minHeight: "16px" }}>
+                      <div className="flex-1 h-[1px] opacity-10" style={{ backgroundColor: theme.textSecondary }} />
+                      <span className="px-3 text-[10px] font-black uppercase tracking-wider opacity-50 shrink-0" style={{ color: theme.textSecondary }}>
+                        {dateLabel}
+                      </span>
+                      <div className="flex-1 h-[1px] opacity-10" style={{ backgroundColor: theme.textSecondary }} />
+                    </div>
+                  )}
+
+                  {isFirstUnread && (
+                    <div className="flex items-center justify-center my-0.5 select-none w-full" style={{ height: "16px", minHeight: "16px" }}>
+                      <div className="flex-1 h-[1px] opacity-20" style={{ backgroundColor: theme.textSecondary }} />
+                      <span className="px-3 text-[10px] font-black uppercase tracking-wider opacity-60 shrink-0" style={{ color: theme.accent }}>
+                        New Messages
+                      </span>
+                      <div className="flex-1 h-[1px] opacity-20" style={{ backgroundColor: theme.textSecondary }} />
+                    </div>
+                  )}
+
+                  <MessageCard
+                    msg={msg}
+                    allMessages={messages}
+                    nickname={nickname}
+                    theme={theme}
+                    currentThemeType={currentThemeType}
+                    onReply={(targetMsg) => setReplyingTo(targetMsg)}
+                    onReplyHeaderClick={handleReplyHeaderClick}
+                    isHighlighted={highlightedMessageId === msg.id}
+                    formatTime={formatTime}
+                    onReaction={handleReaction}
+                    onPin={handlePinMessage}
+                    onCopy={handleCopyMessage}
+                    onDelete={handleDeleteMessage}
+                    onStartEditing={(targetMsg) => {
+                      setEditingMessage(targetMsg);
+                      setInputValue(targetMsg.content);
+                      inputRef.current?.focus();
+                    }}
+                    fontSize={fontSize}
+                    compactMode={compactMode}
+                    showTimestamps={showTimestamps}
+                  />
+                </div>
+              );
+            });
+          })()
         )}
         <div ref={messageEndRef} style={{ height: 0, minHeight: 0, flexShrink: 0 }} />
       </main>
 
+      {/* FLOATING JUMP TO LATEST & UNREAD COUNT BUTTON */}
+      {(() => {
+        const getUnreadCount = () => {
+          const lastSeenId = localStorage.getItem(`chat_last_seen_${roomCode}_${nickname}`);
+          if (!lastSeenId) return 0;
+          const lastSeenIndex = messages.findIndex(m => m.id === lastSeenId);
+          if (lastSeenIndex === -1) return 0;
+          return messages.slice(lastSeenIndex + 1).filter(m => m.sender !== nickname).length;
+        };
+
+        const unreadCount = getUnreadCount();
+
+        return (
+          <AnimatePresence>
+            {showJumpToLatest && (
+              <motion.button
+                initial={{ scale: 0.85, opacity: 0, y: 10 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.85, opacity: 0, y: 10 }}
+                transition={{ duration: 0.15 }}
+                onClick={scrollToBottom}
+                className="absolute bottom-24 max-md:bottom-[72px] right-4 z-30 flex items-center gap-1.5 px-3.5 py-2 rounded-full border shadow-lg text-[10px] font-black uppercase tracking-wider cursor-pointer transition-transform hover:scale-105 active:scale-95 select-none"
+                style={{
+                  backgroundColor: theme.accent,
+                  borderColor: theme.border,
+                  color: "#ffffff"
+                }}
+              >
+                <span className="text-xs">↓</span>
+                <span>{unreadCount > 0 ? `${unreadCount} New Messages` : "Newest"}</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
+        );
+      })()}
+
+      {/* TOAST PANEL */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className="absolute bottom-24 max-md:bottom-[72px] left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-full shadow-xl border text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 select-none"
+            style={{
+              backgroundColor: theme.card,
+              borderColor: theme.border,
+              color: theme.text,
+              boxShadow: "0 10px 25px -5px rgba(0,0,0,0.15)"
+            }}
+          >
+            <span>✨</span>
+            <span>{toastMessage}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* BOTTOM INPUT FOOTER */}
       <footer 
-        className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[420px] px-4 pb-5 pt-3 z-20 border-t transition-colors duration-300 flex flex-col gap-2"
+        className="absolute bottom-0 left-0 w-full px-4 pb-5 max-md:pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] pt-3 max-md:pt-2 z-20 border-t transition-colors duration-300 flex flex-col gap-2 max-md:gap-1.5"
         style={{ borderColor: theme.border, backgroundColor: theme.bg }}
       >
+        {/* Realtime Typing Indicator snippet */}
+        {typingUsers.length > 0 && (
+          <div className="flex items-center gap-1.5 text-[11px] font-medium opacity-75 px-1 pb-1 text-left select-none" style={{ color: theme.textSecondary }}>
+            <span>{typingUsers.join(", ")} is typing</span>
+            <span className="flex items-center gap-0.5 mt-0.5">
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce shrink-0" style={{ animationDelay: "0ms" }} />
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce shrink-0" style={{ animationDelay: "150ms" }} />
+              <span className="w-1 h-1 rounded-full bg-current animate-bounce shrink-0" style={{ animationDelay: "300ms" }} />
+            </span>
+          </div>
+        )}
+
+        {/* Reply Preview */}
         <AnimatePresence initial={false}>
           {replyingTo && (
             <motion.div
@@ -738,7 +1378,7 @@ export default function ChatView({
                   backdropFilter: "blur(4px)"
                 }}
               >
-                <div className="flex-1 min-w-0 flex items-start gap-2">
+                <div className="flex-1 min-w-0 flex items-start gap-2 text-left">
                   <CornerUpLeft className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: theme.accent }} />
                   <div className="min-w-0">
                     <div className="font-black uppercase tracking-wider text-[10px]" style={{ color: theme.accent }}>
@@ -764,15 +1404,59 @@ export default function ChatView({
           )}
         </AnimatePresence>
 
-        <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+        {/* Edit Preview */}
+        <AnimatePresence initial={false}>
+          {editingMessage && (
+            <motion.div
+              initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+              animate={{ opacity: 1, height: "auto", marginBottom: 4 }}
+              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+              className="overflow-hidden"
+            >
+              <div 
+                className="p-3 rounded-2xl border flex items-start justify-between gap-3 text-xs"
+                style={{
+                  borderColor: theme.border,
+                  backgroundColor: `${theme.card}bf`,
+                  backdropFilter: "blur(4px)"
+                }}
+              >
+                <div className="flex-1 min-w-0 flex items-start gap-2 text-left">
+                  <Edit3 className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: theme.accent }} />
+                  <div className="min-w-0">
+                    <div className="font-black uppercase tracking-wider text-[10px]" style={{ color: theme.accent }}>
+                      Editing Message
+                    </div>
+                    <p className="opacity-70 truncate max-w-full text-xs" style={{ color: theme.text }}>
+                      {editingMessage.content}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingMessage(null);
+                    setInputValue("");
+                  }}
+                  className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+                  style={{ color: theme.textSecondary }}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <form onSubmit={handleSendMessage} className="flex items-center gap-2 max-md:gap-1.5">
           <input
             ref={inputRef}
             type="text"
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            onChange={(e) => handleInputValueChange(e.target.value)}
             placeholder={currentThemeType === "cat" ? "🐾 Whisper a cozy message..." : "Type a message..."}
-            className={`flex-1 h-12 px-4 text-sm outline-none border transition-all duration-300 ${
-              currentThemeType === "cat" ? "rounded-[22px]" : "rounded-full"
+            className={`flex-1 h-12 max-md:h-11 px-4 max-md:px-3 text-sm outline-none border transition-all duration-300 ${
+              currentThemeType === "cat" ? "rounded-[22px] max-md:rounded-[20px]" : "rounded-full"
             }`}
             style={{
               borderColor: theme.border,
@@ -795,8 +1479,8 @@ export default function ChatView({
             disabled={!inputValue.trim()}
             whileHover={currentThemeType === "cat" && inputValue.trim() ? { y: -1, scale: 1.02 } : {}}
             whileTap={currentThemeType === "cat" && inputValue.trim() ? { y: 2, scale: 0.98 } : {}}
-            className={`h-12 flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed select-none ${
-              currentThemeType === "cat" ? "w-14 rounded-[20px]" : "w-12 rounded-full"
+            className={`h-12 max-md:h-11 flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed select-none ${
+              currentThemeType === "cat" ? "w-14 max-md:w-11 rounded-[20px] max-md:rounded-[18px]" : "w-12 max-md:w-11 rounded-full"
             }`}
             style={{
               backgroundColor: theme.accent,
@@ -829,7 +1513,7 @@ export default function ChatView({
               initial={{ scale: 0.95, y: 15, opacity: 0 }}
               animate={{ scale: 1, y: 0, opacity: 1 }}
               exit={{ scale: 0.95, y: 15, opacity: 0 }}
-              className="w-full max-w-[340px] p-6 rounded-3xl border relative"
+              className="w-full max-w-[340px] p-6 rounded-3xl border relative text-left"
               style={{
                 borderColor: theme.border,
                 backgroundColor: theme.card,
@@ -849,19 +1533,20 @@ export default function ChatView({
                 Vault Settings
               </h2>
 
-              <div className="space-y-4">
+              <div className="space-y-3.5 max-h-[380px] overflow-y-auto pr-1 select-none">
+                {/* 1. Notification Sound */}
                 <div className="flex items-center justify-between gap-4 p-3 rounded-2xl border" style={{ borderColor: theme.border, backgroundColor: theme.bg }}>
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-bold" style={{ color: theme.text }}>
                       Notification Sound
                     </div>
                     <p className="text-[10px] opacity-60 mt-0.5 leading-relaxed" style={{ color: theme.text }}>
-                      Play sound on new messages when away or unfocused.
+                      Play subtle chime on incoming messages.
                     </p>
                   </div>
                   <button
                     onClick={() => setSoundEnabled(!soundEnabled)}
-                    className="p-2 rounded-full border transition-all duration-300 cursor-pointer active:scale-90"
+                    className="p-2 rounded-full border transition-all duration-300 cursor-pointer active:scale-90 shrink-0"
                     style={{ 
                       borderColor: theme.border, 
                       backgroundColor: soundEnabled ? theme.accent : theme.card,
@@ -872,12 +1557,136 @@ export default function ChatView({
                     {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
                   </button>
                 </div>
+
+                {/* 2. Browser Notifications */}
+                <div className="flex items-center justify-between gap-4 p-3 rounded-2xl border" style={{ borderColor: theme.border, backgroundColor: theme.bg }}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-bold" style={{ color: theme.text }}>
+                      Desktop Notifications
+                    </div>
+                    <p className="text-[10px] opacity-60 mt-0.5 leading-relaxed" style={{ color: theme.text }}>
+                      Show system popups when app is blurred.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if ("Notification" in window) {
+                        if (Notification.permission !== "granted") {
+                          Notification.requestPermission().then(perm => {
+                            setBrowserNotificationsEnabled(perm === "granted");
+                          });
+                        } else {
+                          setBrowserNotificationsEnabled(!browserNotificationsEnabled);
+                        }
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-xl border text-[10px] font-bold transition-all shrink-0 cursor-pointer"
+                    style={{
+                      borderColor: theme.border,
+                      backgroundColor: browserNotificationsEnabled ? theme.accent : theme.card,
+                      color: browserNotificationsEnabled ? "#ffffff" : theme.text
+                    }}
+                  >
+                    {browserNotificationsEnabled ? "ON" : "OFF"}
+                  </button>
+                </div>
+
+                {/* 3. Theme Preset Selection */}
+                <div className="flex flex-col gap-2 p-3 rounded-2xl border text-left" style={{ borderColor: theme.border, backgroundColor: theme.bg }}>
+                  <div className="text-xs font-bold" style={{ color: theme.text }}>Theme Preset</div>
+                  <div className="grid grid-cols-4 gap-1.5 mt-1">
+                    {(['light', 'dark', 'pink', 'cat'] as ThemeType[]).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => onThemeChange(t)}
+                        className={`py-1.5 px-1 text-[9px] font-black uppercase tracking-wider rounded-xl border transition-all cursor-pointer ${
+                          currentThemeType === t ? "ring-2 ring-amber-500 font-extrabold scale-102" : "opacity-80"
+                        }`}
+                        style={{
+                          backgroundColor: theme.card,
+                          borderColor: theme.border,
+                          color: theme.text
+                        }}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 4. Custom Font Sizes */}
+                <div className="flex flex-col gap-2 p-3 rounded-2xl border text-left" style={{ borderColor: theme.border, backgroundColor: theme.bg }}>
+                  <div className="text-xs font-bold" style={{ color: theme.text }}>Chat Font Size</div>
+                  <div className="grid grid-cols-3 gap-1.5 mt-1">
+                    {(['small', 'medium', 'large'] as const).map((sz) => (
+                      <button
+                        key={sz}
+                        onClick={() => setFontSize(sz)}
+                        className={`py-1.5 px-1 text-[9px] font-black uppercase tracking-wider rounded-xl border transition-all cursor-pointer ${
+                          fontSize === sz ? "ring-2 ring-amber-500 font-extrabold scale-102" : "opacity-80"
+                        }`}
+                        style={{
+                          backgroundColor: theme.card,
+                          borderColor: theme.border,
+                          color: theme.text
+                        }}
+                      >
+                        {sz}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 5. Compact Mode Toggle */}
+                <div className="flex items-center justify-between gap-4 p-3 rounded-2xl border" style={{ borderColor: theme.border, backgroundColor: theme.bg }}>
+                  <div className="flex-1 min-w-0 text-left">
+                    <div className="text-xs font-bold" style={{ color: theme.text }}>
+                      Compact Density
+                    </div>
+                    <p className="text-[10px] opacity-60 mt-0.5 leading-relaxed" style={{ color: theme.text }}>
+                      Denser bubbles (maintaining strict spacing).
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={compactMode}
+                    onChange={(e) => setCompactMode(e.target.checked)}
+                    className="w-4 h-4 rounded text-amber-500 border-gray-300 focus:ring-amber-500 cursor-pointer shrink-0"
+                  />
+                </div>
+
+                {/* 6. Show Timestamps */}
+                <div className="flex items-center justify-between gap-4 p-3 rounded-2xl border" style={{ borderColor: theme.border, backgroundColor: theme.bg }}>
+                  <div className="flex-1 min-w-0 text-left">
+                    <div className="text-xs font-bold" style={{ color: theme.text }}>
+                      Display Timestamps
+                    </div>
+                    <p className="text-[10px] opacity-60 mt-0.5 leading-relaxed" style={{ color: theme.text }}>
+                      Show send time on bubble headers.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={showTimestamps}
+                    onChange={(e) => setShowTimestamps(e.target.checked)}
+                    className="w-4 h-4 rounded text-amber-500 border-gray-300 focus:ring-amber-500 cursor-pointer shrink-0"
+                  />
+                </div>
+
+                {/* 7. Clear local cache */}
+                <button
+                  type="button"
+                  onClick={handleClearLocalCache}
+                  className="w-full mt-2 py-2.5 rounded-xl border text-[10px] font-black uppercase tracking-wider text-red-500 border-red-500/20 hover:bg-red-500/5 cursor-pointer active:scale-[0.98] transition-all"
+                >
+                  Clear Local Cache
+                </button>
               </div>
 
-              <div className="mt-6 flex justify-end">
+              <div className="mt-5 flex justify-end">
                 <button
                   onClick={() => setIsSettingsOpen(false)}
-                  className="px-4 py-2 rounded-full text-xs font-bold transition-all duration-200 cursor-pointer active:scale-95"
+                  className="px-4 py-2 rounded-full text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer active:scale-95"
                   style={{ backgroundColor: theme.accent, color: "#ffffff" }}
                 >
                   Close
