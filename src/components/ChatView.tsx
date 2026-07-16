@@ -2,7 +2,34 @@ import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ThemeConfig } from "../theme.js";
 import { ThemeType, MessageType } from "../types.js";
-import { ArrowLeft, RefreshCw, Send, Users, ShieldAlert, X, CornerUpLeft } from "lucide-react";
+import { ArrowLeft, RefreshCw, Send, Users, ShieldAlert, X, CornerUpLeft, Settings, Volume2, VolumeX } from "lucide-react";
+
+// Synthesizes a high-fidelity, subtle dual-tone chime using Web Audio API (perfectly self-contained)
+const playNotificationSound = () => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const audioContext = new AudioCtx();
+    const playTone = (freq: number, start: number, duration: number) => {
+      const osc = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, start);
+      gainNode.gain.setValueAtTime(0, start);
+      gainNode.gain.linearRampToValueAtTime(0.12, start + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      osc.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      osc.start(start);
+      osc.stop(start + duration);
+    };
+    const now = audioContext.currentTime;
+    playTone(880, now, 0.22); // A5
+    playTone(1046.5, now + 0.08, 0.32); // C6
+  } catch (err) {
+    console.error("Failed to play notification sound:", err);
+  }
+};
 import { collection, doc, query, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebase.js";
 import ThemeSelector from "./ThemeSelector.js";
@@ -36,6 +63,29 @@ export default function ChatView({
   const [refreshing, setRefreshing] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageType | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    try {
+      return localStorage.getItem("chat_sound_enabled") !== "false";
+    } catch (e) {
+      return true;
+    }
+  });
+
+  const soundEnabledRef = useRef(soundEnabled);
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
+
+  // Request notification permission the first time user1 logs in
+  useEffect(() => {
+    if (nickname === "user1" && "Notification" in window) {
+      if (Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+    }
+  }, [nickname]);
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -96,6 +146,7 @@ export default function ChatView({
     const messagesRef = collection(db, "chat", roomCode, "messages");
     const q = query(messagesRef, orderBy("timestamp", "asc"));
     
+    let isInitial = true;
     const unsubscribeMessages = onSnapshot(q, (snapshot) => {
       const msgs: MessageType[] = [];
       snapshot.forEach((docSnap) => {
@@ -111,6 +162,56 @@ export default function ChatView({
           replyToMessageId: data.replyToMessageId || undefined
         });
       });
+
+      // Handle real-time notifications for user1 when user2 sends a message
+      if (!isInitial) {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === "added") {
+            const data = change.doc.data();
+            const sender = data.sender;
+            const text = data.text || "";
+            
+            if (sender === "user2") {
+              const hasFocus = typeof (window as any).hasFocus === "function" 
+                ? (window as any).hasFocus() 
+                : (document.hasFocus ? document.hasFocus() : true);
+              const isFocused = document.visibilityState === "visible" && hasFocus;
+
+              if (!isFocused && nickname === "user1") {
+                const permissionGranted = "Notification" in window && Notification.permission === "granted";
+
+                // Show browser notification if permitted
+                if (permissionGranted) {
+                  const title = "Private Chat";
+                  const body = `user2:\n${text}`;
+                  const iconUrl = document.querySelector("link[rel*='icon']")?.getAttribute("href") || "/favicon.ico";
+
+                  const notification = new Notification(title, {
+                    body,
+                    icon: iconUrl,
+                    tag: "private-chat-new-msg"
+                  });
+
+                  notification.onclick = () => {
+                    window.focus();
+                    try {
+                      parent.focus();
+                    } catch (e) {}
+                  };
+                }
+
+                // Play subtle tone if enabled and permission is granted
+                if (soundEnabledRef.current && permissionGranted) {
+                  playNotificationSound();
+                }
+              }
+            }
+          }
+        });
+      } else {
+        isInitial = false;
+      }
+
       setMessages(msgs);
       scrollToBottom();
     }, (err) => {
@@ -273,6 +374,18 @@ export default function ChatView({
         <div className="flex items-center gap-2">
           {/* Theme buttons */}
           <ThemeSelector currentTheme={currentThemeType} onThemeChange={onThemeChange} />
+
+          {/* Settings button - ONLY FOR USER1 */}
+          {nickname === "user1" && (
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 rounded-full border transition-all duration-300 cursor-pointer active:scale-90"
+              style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
+              title="Chat Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+          )}
 
           {/* Manual pull/refresh button */}
           <button
@@ -461,6 +574,73 @@ export default function ChatView({
           </button>
         </form>
       </footer>
+
+      {/* SETTINGS DIALOG MODAL FOR USER1 */}
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80">
+            <motion.div
+              initial={{ scale: 0.95, y: 15, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.95, y: 15, opacity: 0 }}
+              className="w-full max-w-[340px] p-6 rounded-3xl border relative"
+              style={{
+                borderColor: theme.border,
+                backgroundColor: theme.card,
+                color: theme.text
+              }}
+            >
+              <button
+                onClick={() => setIsSettingsOpen(false)}
+                className="absolute top-4 right-4 p-1.5 rounded-full opacity-60 hover:opacity-100 transition-colors cursor-pointer"
+                style={{ color: theme.text }}
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <h2 className="text-sm font-black uppercase tracking-wider mb-4 flex items-center gap-2">
+                <Settings className="w-4 h-4" style={{ color: theme.accent }} />
+                Vault Settings
+              </h2>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-4 p-3 rounded-2xl border" style={{ borderColor: theme.border, backgroundColor: theme.bg }}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-bold" style={{ color: theme.text }}>
+                      Notification Sound
+                    </div>
+                    <p className="text-[10px] opacity-60 mt-0.5 leading-relaxed" style={{ color: theme.text }}>
+                      Play sound on new messages when away or unfocused.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setSoundEnabled(!soundEnabled)}
+                    className="p-2 rounded-full border transition-all duration-300 cursor-pointer active:scale-90"
+                    style={{ 
+                      borderColor: theme.border, 
+                      backgroundColor: soundEnabled ? theme.accent : theme.card,
+                      color: soundEnabled ? "#ffffff" : theme.text 
+                    }}
+                    title={soundEnabled ? "Disable Sound" : "Enable Sound"}
+                  >
+                    {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="px-4 py-2 rounded-full text-xs font-bold transition-all duration-200 cursor-pointer active:scale-95"
+                  style={{ backgroundColor: theme.accent, color: "#ffffff" }}
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

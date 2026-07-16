@@ -109,6 +109,9 @@ export default function App() {
   // 4. SECURITY FEATURE 1: Tab Hidden Countdown (30 seconds)
   useEffect(() => {
     const handleVisibilityChange = () => {
+      const currentNick = nickname || sessionStorage.getItem("chat_nickname") || localStorage.getItem("chat_nickname");
+      if (currentNick === "user1") return;
+
       if (document.visibilityState === "hidden") {
         if (view === "chat" && sessionToken) {
           // Trigger logout if away for 30 seconds
@@ -131,11 +134,12 @@ export default function App() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (tabTimeoutRef.current) clearTimeout(tabTimeoutRef.current);
     };
-  }, [view, sessionToken]);
+  }, [view, sessionToken, nickname]);
 
   // 5. SECURITY FEATURE 2: Inactivity Timeout (30 minutes)
   useEffect(() => {
-    if (view !== "chat" || !sessionToken) return;
+    const currentNick = nickname || sessionStorage.getItem("chat_nickname") || localStorage.getItem("chat_nickname");
+    if (view !== "chat" || !sessionToken || currentNick === "user1") return;
 
     let inactivityTimer: NodeJS.Timeout;
 
@@ -159,7 +163,7 @@ export default function App() {
         window.removeEventListener(event, resetInactivityTimer);
       });
     };
-  }, [view, sessionToken]);
+  }, [view, sessionToken, nickname]);
 
   // 6. Cleanup presence on unexpected exits (beforeunload, pagehide, visibilitychange)
   useEffect(() => {
