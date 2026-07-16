@@ -1,7 +1,29 @@
 import React, { useState } from "react";
 import { motion } from "motion/react";
 import { ThemeConfig } from "../theme.js";
-import { MessageSquare, Key, User, LogIn, Lock } from "lucide-react";
+import { MessageSquare, Key, User, LogIn, Lock, RefreshCw } from "lucide-react";
+
+// Lightweight animated cat paw loader
+const CatLoader = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" className="inline-block">
+    <style>{`
+      @keyframes paw-pulse-home {
+        0%, 100% { opacity: 0.2; transform: scale(0.9); }
+        35% { opacity: 1; transform: scale(1.05); }
+      }
+      .toe-h1 { animation: paw-pulse-home 1.2s infinite ease-in-out; }
+      .toe-h2 { animation: paw-pulse-home 1.2s infinite ease-in-out 0.15s; }
+      .toe-h3 { animation: paw-pulse-home 1.2s infinite ease-in-out 0.3s; }
+      .toe-h4 { animation: paw-pulse-home 1.2s infinite ease-in-out 0.45s; }
+      .pad-hmain { animation: paw-pulse-home 1.2s infinite ease-in-out 0.6s; }
+    `}</style>
+    <path className="pad-hmain origin-center" fill="currentColor" d="M12 18c-2.2 0-4-1.8-4-4s1.8-4 4-4 4 1.8 4 4-1.8 4-4 4z" />
+    <circle className="toe-h1 origin-center" cx="7" cy="8" r="1.5" fill="currentColor" />
+    <circle className="toe-h2 origin-center" cx="10" cy="5" r="1.5" fill="currentColor" />
+    <circle className="toe-h3 origin-center" cx="14" cy="5" r="1.5" fill="currentColor" />
+    <circle className="toe-h4 origin-center" cx="17" cy="8" r="1.5" fill="currentColor" />
+  </svg>
+);
 
 interface HomeViewProps {
   theme: ThemeConfig;
@@ -223,7 +245,11 @@ export default function HomeView({ theme, onJoin }: HomeViewProps) {
             color: "#ffffff"
           }}
         >
-          <LogIn className="w-5 h-5" />
+          {loading ? (
+            theme.bg === "#FFF8F2" ? <CatLoader /> : <RefreshCw className="w-5 h-5 animate-spin" />
+          ) : (
+            <LogIn className="w-5 h-5" />
+          )}
           {loading ? "Connecting..." : "Join Chat"}
         </button>
       </motion.form>

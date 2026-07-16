@@ -30,6 +30,83 @@ const playNotificationSound = () => {
     console.error("Failed to play notification sound:", err);
   }
 };
+
+// Custom, highly elegant cozy cat cafe line-art logo
+const CatSvgLogo = ({ className = "w-5 h-5", isBlinking = false }: { className?: string; isBlinking?: boolean }) => (
+  <motion.svg 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2.2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round" 
+    className={className}
+    animate={isBlinking ? { scaleY: [1, 0.1, 1] } : {}}
+    transition={{ duration: 0.35, ease: "easeInOut" }}
+  >
+    {/* Cat ears and head contour */}
+    <path d="M3 11c0 4.4 3.6 8 8 8s8-3.6 8-8c0-1.8-.6-3.6-1.6-5L15 8.5H9L6.6 6C5.6 7.4 5 9.2 5 11z" fill="currentColor" fillOpacity="0.12" />
+    {/* Sleepy curved eyes */}
+    <path d="M8.5 12.5c.3 .4.9 .4 1.2 0" />
+    <path d="M14.5 12.5c.3 .4.9 .4 1.2 0" />
+    {/* Heart-shaped cute nose */}
+    <path d="M11.5 14.5h1l-.5 .8z" fill="currentColor" stroke="none" />
+  </motion.svg>
+);
+
+// Cozy staggered paw loader for the cat café theme
+const StaggeredPawLoader = () => (
+  <div className="flex items-center gap-1 inline-flex shrink-0">
+    <style>{`
+      @keyframes paw-fade {
+        0%, 100% { opacity: 0.15; transform: scale(0.85); }
+        33% { opacity: 1; transform: scale(1.05); }
+      }
+      .paw-step-1 { animation: paw-fade 1.2s infinite ease-in-out; }
+      .paw-step-2 { animation: paw-fade 1.2s infinite ease-in-out 0.3s; }
+      .paw-step-3 { animation: paw-fade 1.2s infinite ease-in-out 0.6s; }
+    `}</style>
+    {[1, 2, 3].map((num) => (
+      <svg key={num} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" className={`paw-step-${num} text-amber-600`}>
+        <path d="M8,14 C6,14 4.5,12.5 4.5,10.5 C4.5,9.5 5.5,8.5 8,8.5 C10.5,8.5 11.5,9.5 11.5,10.5 C11.5,12.5 10,14 8,14 Z" />
+        <circle cx="4" cy="6" r="1.5" />
+        <circle cx="6.5" cy="4" r="1.5" />
+        <circle cx="9.5" cy="4" r="1.5" />
+        <circle cx="12" cy="6" r="1.5" />
+      </svg>
+    ))}
+  </div>
+);
+
+// High-fidelity custom illustration of a sleeping cat with floating Zzz letters
+const SleepingCatIllustration = () => (
+  <div className="relative w-36 h-24 mb-4 flex items-center justify-center">
+    {/* Animated Zzz floating up */}
+    <div className="absolute right-4 top-0 flex flex-col items-start font-mono text-[10px] font-bold text-amber-700/60 select-none">
+      <span className="cat-zzz-1 absolute">Z</span>
+      <span className="cat-zzz-2 absolute ml-2 mt-1">z</span>
+      <span className="cat-zzz-3 absolute ml-4 mt-2 text-[7px]">z</span>
+    </div>
+    {/* Sleepy cat SVG */}
+    <svg viewBox="0 0 100 60" className="w-28 h-20 text-amber-600/80" fill="currentColor">
+      {/* Sleepy cat body (curved ball) */}
+      <path d="M20,45 C20,30 35,20 55,20 C75,20 85,32 85,45 C85,52 75,55 55,55 C35,55 20,52 20,45 Z" fill="currentColor" fillOpacity="0.15" stroke="#B45309" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      {/* Cat head tucked in */}
+      <circle cx="32" cy="40" r="13" fill="#FFF8F2" stroke="#B45309" strokeWidth="2.5" />
+      {/* Ears */}
+      <path d="M22,32 L20,20 L30,28 Z" fill="#F5D7A1" stroke="#B45309" strokeWidth="2.5" strokeLinejoin="round" />
+      <path d="M42,32 L44,20 L34,28 Z" fill="#F5D7A1" stroke="#B45309" strokeWidth="2.5" strokeLinejoin="round" />
+      {/* Curved sleeping eyes */}
+      <path d="M24,42 C25,44 28,44 29,42" fill="none" stroke="#B45309" strokeWidth="2" strokeLinecap="round" />
+      <path d="M35,42 C36,44 39,44 40,42" fill="none" stroke="#B45309" strokeWidth="2" strokeLinecap="round" />
+      {/* Nose */}
+      <path d="M31.5,45 L32.5,45 L32,45.8 Z" fill="#B45309" />
+      {/* Tail curled around body */}
+      <path d="M84,45 C88,48 90,52 85,54 C80,56 75,53 72,50" fill="none" stroke="#B45309" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  </div>
+);
+
 import { collection, doc, query, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebase.js";
 import ThemeSelector from "./ThemeSelector.js";
@@ -63,6 +140,36 @@ export default function ChatView({
   const [refreshing, setRefreshing] = useState(false);
   const [replyingTo, setReplyingTo] = useState<MessageType | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [inputFocused, setInputFocused] = useState(false);
+  const [activeMicroAnimation, setActiveMicroAnimation] = useState<"paw" | "blink" | null>(null);
+
+  // Micro-animations scheduling: randomly every 45-75 seconds
+  useEffect(() => {
+    if (currentThemeType !== "cat") return;
+
+    let timer: NodeJS.Timeout;
+
+    const triggerAnimation = () => {
+      const chosen = Math.random() > 0.5 ? "paw" : "blink";
+      setActiveMicroAnimation(chosen);
+
+      // Animation lasts 1.8 seconds (completely subtle)
+      setTimeout(() => {
+        setActiveMicroAnimation(null);
+      }, 1800);
+
+      // Schedule next one randomly between 45 and 75 seconds
+      const nextDelay = (45 + Math.random() * 30) * 1000;
+      timer = setTimeout(triggerAnimation, nextDelay);
+    };
+
+    // First trigger after 20 seconds of active chat so they see it soon, but not instantly
+    timer = setTimeout(triggerAnimation, 20000);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [currentThemeType]);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => {
@@ -310,44 +417,87 @@ export default function ChatView({
 
   return (
     <div className="flex flex-col min-h-screen relative overflow-hidden">
+      {/* Background pattern for Cat Theme */}
       {currentThemeType === "cat" && (
-        <div className="absolute inset-0 pointer-events-none overflow-hidden select-none z-0">
-          {/* Subtle static paw print watermark 1 */}
-          <div className="absolute left-[10%] top-[25%]" style={{ color: theme.border, opacity: 0.035 }}>
-            <svg width="48" height="48" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M8,14 C6,14 4.5,12.5 4.5,10.5 C4.5,9.5 5.5,8.5 8,8.5 C10.5,8.5 11.5,9.5 11.5,10.5 C11.5,12.5 10,14 8,14 Z" />
-              <circle cx="4" cy="6" r="1.5" />
-              <circle cx="6.5" cy="4" r="1.5" />
-              <circle cx="9.5" cy="4" r="1.5" />
-              <circle cx="12" cy="6" r="1.5" />
-            </svg>
-          </div>
-          {/* Subtle static paw print watermark 2 */}
-          <div className="absolute right-[15%] top-[50%]" style={{ color: theme.border, opacity: 0.035 }}>
-            <svg width="60" height="60" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M8,14 C6,14 4.5,12.5 4.5,10.5 C4.5,9.5 5.5,8.5 8,8.5 C10.5,8.5 11.5,9.5 11.5,10.5 C11.5,12.5 10,14 8,14 Z" />
-              <circle cx="4" cy="6" r="1.5" />
-              <circle cx="6.5" cy="4" r="1.5" />
-              <circle cx="9.5" cy="4" r="1.5" />
-              <circle cx="12" cy="6" r="1.5" />
-            </svg>
-          </div>
-          {/* Subtle static paw print watermark 3 */}
-          <div className="absolute left-[12%] top-[75%]" style={{ color: theme.border, opacity: 0.035 }}>
-            <svg width="40" height="40" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M8,14 C6,14 4.5,12.5 4.5,10.5 C4.5,9.5 5.5,8.5 8,8.5 C10.5,8.5 11.5,9.5 11.5,10.5 C11.5,12.5 10,14 8,14 Z" />
-              <circle cx="4" cy="6" r="1.5" />
-              <circle cx="6.5" cy="4" r="1.5" />
-              <circle cx="9.5" cy="4" r="1.5" />
-              <circle cx="12" cy="6" r="1.5" />
-            </svg>
-          </div>
-        </div>
+        <>
+          {/* Layer 1: Cozy radial cream-caramel gradient */}
+          <div 
+            className="absolute inset-0 pointer-events-none z-0" 
+            style={{ 
+              background: "radial-gradient(circle at 50% 30%, #FFFDFB 0%, #FFF4EB 50%, #FFF0E2 100%)"
+            }} 
+          />
+          {/* Layer 2: Ultra-subtle paper/noise texture */}
+          <div 
+            className="absolute inset-0 pointer-events-none opacity-[0.015] z-0" 
+            style={{ 
+              backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(`
+                <svg viewBox='0 0 250 250' xmlns='http://www.w3.org/2000/svg'>
+                  <filter id='noiseFilter'>
+                    <feTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/>
+                  </filter>
+                  <rect width='100%' height='100%' filter='url(#noiseFilter)'/>
+                </svg>
+              `)}")`
+            }} 
+          />
+          {/* Layer 3: Faint hand-drawn paw and yarn repeating pattern */}
+          <div 
+            className="absolute inset-0 pointer-events-none opacity-[0.03] z-0" 
+            style={{ 
+              backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(`
+                <svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'>
+                  <!-- Cute micro paw print -->
+                  <g fill='#D97706'>
+                    <path d='M30 45 c-2.2 0 -3.5 -1.8 -3.5 -4 c0 -1.2 1.2 -2.2 3.5 -2.2 c2.3 0 3.5 1 3.5 2.2 c0 2.2 -1.3 4 -3.5 4 z' />
+                    <circle cx='25' cy='35' r='1.2' />
+                    <circle cx='28.3' cy='32.5' r='1.2' />
+                    <circle cx='31.7' cy='32.5' r='1.2' />
+                    <circle cx='35' cy='35' r='1.2' />
+                  </g>
+                  <!-- Yarn ball with a trailing thread -->
+                  <g stroke='#D97706' fill='none' stroke-width='0.6'>
+                    <circle cx='90' cy='85' r='6.5' />
+                    <path d='M86.5 81.5 C89 88.5 91 81.5 93.5 88.5' />
+                    <path d='M83.5 85 C90.5 82.5 83.5 90.5 96.5 85' />
+                    <path d='M90 91.5 C91 93 93 94 95 93' />
+                  </g>
+                </svg>
+              `)}")`,
+              backgroundRepeat: "repeat",
+              backgroundSize: "120px 120px"
+            }}
+          />
+        </>
       )}
+
+      {/* Floating Paw micro-animation */}
+      {activeMicroAnimation === "paw" && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8, y: 10 }}
+          animate={{ opacity: [0, 0.25, 0.25, 0], scale: [0.8, 1.05, 1.05, 0.9], y: [10, 0, 0, -12] }}
+          transition={{ duration: 1.8, times: [0, 0.15, 0.85, 1], ease: "easeInOut" }}
+          className="absolute left-6 bottom-24 pointer-events-none z-10"
+          style={{ color: theme.accent }}
+        >
+          <svg width="32" height="32" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8,14 C6,14 4.5,12.5 4.5,10.5 C4.5,9.5 5.5,8.5 8,8.5 C10.5,8.5 11.5,9.5 11.5,10.5 C11.5,12.5 10,14 8,14 Z" />
+            <circle cx="4" cy="6" r="1.5" />
+            <circle cx="6.5" cy="4" r="1.5" />
+            <circle cx="9.5" cy="4" r="1.5" />
+            <circle cx="12" cy="6" r="1.5" />
+          </svg>
+        </motion.div>
+      )}
+
       {/* HEADER TOP BAR */}
       <header 
-        className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[420px] h-16 px-4 flex items-center justify-between border-b z-20 transition-colors duration-300"
-        style={{ borderColor: theme.border, backgroundColor: theme.bg }}
+        className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-[420px] h-16 px-4 flex items-center justify-between border-b z-20 transition-all duration-300"
+        style={{ 
+          borderColor: theme.border, 
+          backgroundColor: theme.bg,
+          boxShadow: currentThemeType === "cat" ? "0 2px 14px rgba(139, 126, 116, 0.05)" : "none"
+        }}
       >
         <button
           onClick={onLeave}
@@ -361,9 +511,13 @@ export default function ChatView({
 
         {/* Room Code Display */}
         <div className="flex flex-col items-center">
-          <span className="text-[10px] font-bold uppercase tracking-wider opacity-40 flex items-center gap-1" style={{ color: theme.text }}>
-            {currentThemeType === "cat" && <span className="text-xs">🐈</span>}
-            Secure Vault
+          <span className="text-[10px] font-bold uppercase tracking-wider opacity-60 flex items-center gap-1" style={{ color: theme.text }}>
+            {currentThemeType === "cat" ? (
+              <span className="flex items-center gap-1.5 text-amber-800 font-extrabold tracking-widest">
+                <CatSvgLogo className="w-4 h-4 text-amber-600 shrink-0" isBlinking={activeMicroAnimation === "blink"} />
+                Secure Vault
+              </span>
+            ) : "Secure Vault"}
           </span>
           <span className="text-sm font-mono font-bold tracking-widest pl-1" style={{ color: theme.text }}>
             #{roomCode}
@@ -392,12 +546,16 @@ export default function ChatView({
             onClick={handleRefresh}
             disabled={refreshing}
             className={`p-2 rounded-full border transition-all duration-300 cursor-pointer ${
-              refreshing ? "animate-spin" : "active:scale-90"
+              refreshing && currentThemeType !== "cat" ? "animate-spin" : "active:scale-90"
             }`}
             style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
             title="Refresh Messages"
           >
-            <RefreshCw className="w-4 h-4" />
+            {refreshing && currentThemeType === "cat" ? (
+              <StaggeredPawLoader />
+            ) : (
+              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+            )}
           </button>
         </div>
       </header>
@@ -433,23 +591,35 @@ export default function ChatView({
       </div>
 
       {/* MESSAGE LIST */}
-      <main className="flex-1 overflow-y-auto px-1 pt-4 pb-28">
+      <main className={`flex-1 overflow-y-auto px-1 pt-4 pb-28 ${currentThemeType === "cat" ? "cat-scrollbar" : ""}`}>
         <div className="flex flex-col gap-3.5">
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-              <div 
-                className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4 opacity-50"
-                style={{ backgroundColor: `${theme.accent}15` }}
-              >
-                <Users className="w-6 h-6" style={{ color: theme.accent }} />
+            currentThemeType === "cat" ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center px-6 select-none z-10">
+                <SleepingCatIllustration />
+                <h3 className="text-sm font-bold mb-1 text-amber-900">
+                  No conversations yet.
+                </h3>
+                <p className="text-xs leading-relaxed max-w-xs opacity-70 text-amber-800/70">
+                  Start your conversation.
+                </p>
               </div>
-              <h3 className="text-sm font-semibold mb-1" style={{ color: theme.text }}>
-                Vault Active & Secured
-              </h3>
-              <p className="text-xs leading-relaxed max-w-xs" style={{ color: theme.textSecondary }}>
-                All correspondence is highly secure and temporary. State is destroyed once you disconnect.
-              </p>
-            </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+                <div 
+                  className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4 opacity-50"
+                  style={{ backgroundColor: `${theme.accent}15` }}
+                >
+                  <Users className="w-6 h-6" style={{ color: theme.accent }} />
+                </div>
+                <h3 className="text-sm font-semibold mb-1" style={{ color: theme.text }}>
+                  Vault Active & Secured
+                </h3>
+                <p className="text-xs leading-relaxed max-w-xs" style={{ color: theme.textSecondary }}>
+                  All correspondence is highly secure and temporary. State is destroyed once you disconnect.
+                </p>
+              </div>
+            )
           ) : (
             <AnimatePresence initial={false}>
               {messages.map((msg) => {
@@ -461,14 +631,22 @@ export default function ChatView({
                       key={msg.id}
                       initial={{ opacity: 0, scale: 0.95 }}
                       animate={{ opacity: 1, scale: 1 }}
-                      className="flex items-center justify-center gap-1.5 py-1.5 px-4 text-[10px] font-bold rounded-xl border text-center my-1"
+                      className={
+                        currentThemeType === "cat"
+                          ? "flex items-center justify-center gap-1.5 py-1.5 px-5 text-[10px] font-semibold rounded-full border text-center my-2 max-w-[85%] mx-auto shadow-[0_2px_8px_rgba(139,126,116,0.04)]"
+                          : "flex items-center justify-center gap-1.5 py-1.5 px-4 text-[10px] font-bold rounded-xl border text-center my-1"
+                      }
                       style={{
-                        borderColor: theme.border,
-                        backgroundColor: `${theme.card}80`,
-                        color: theme.textSecondary
+                        borderColor: currentThemeType === "cat" ? "#F5D7A1" : theme.border,
+                        backgroundColor: currentThemeType === "cat" ? "#FFFDF5" : `${theme.card}80`,
+                        color: currentThemeType === "cat" ? "#8B7E74" : theme.textSecondary
                       }}
                     >
-                      <ShieldAlert className="w-3.5 h-3.5 opacity-60" style={{ color: theme.accent }} />
+                      {currentThemeType === "cat" ? (
+                        <span className="text-xs select-none">🐾</span>
+                      ) : (
+                        <ShieldAlert className="w-3.5 h-3.5 opacity-60" style={{ color: theme.accent }} />
+                      )}
                       <span>{msg.content}</span>
                     </motion.div>
                   );
@@ -547,31 +725,54 @@ export default function ChatView({
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder="Type a message..."
-            className="flex-1 h-12 px-4 rounded-full text-sm outline-none border transition-all duration-300"
+            placeholder={currentThemeType === "cat" ? "🐾 Whisper a cozy message..." : "Type a message..."}
+            className={`flex-1 h-12 px-4 text-sm outline-none border transition-all duration-300 ${
+              currentThemeType === "cat" ? "rounded-[22px]" : "rounded-full"
+            }`}
             style={{
               borderColor: theme.border,
-              backgroundColor: theme.inputBg,
-              color: theme.text
+              backgroundColor: currentThemeType === "cat" ? "#FFF5EB" : theme.inputBg,
+              color: theme.text,
+              caretColor: currentThemeType === "cat" ? "#FF8E9E" : "auto",
+              boxShadow: (currentThemeType === "cat" && inputFocused) ? `0 0 0 3px rgba(245, 158, 11, 0.22)` : "none"
             }}
             onFocus={(e) => {
+              setInputFocused(true);
               e.target.style.borderColor = theme.accent;
             }}
             onBlur={(e) => {
+              setInputFocused(false);
               e.target.style.borderColor = theme.border;
             }}
           />
-          <button
+          <motion.button
             type="submit"
             disabled={!inputValue.trim()}
-            className="w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed select-none"
+            whileHover={currentThemeType === "cat" && inputValue.trim() ? { y: -1, scale: 1.02 } : {}}
+            whileTap={currentThemeType === "cat" && inputValue.trim() ? { y: 2, scale: 0.98 } : {}}
+            className={`h-12 flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed select-none ${
+              currentThemeType === "cat" ? "w-14 rounded-[20px]" : "w-12 rounded-full"
+            }`}
             style={{
               backgroundColor: theme.accent,
-              color: "#ffffff"
+              color: "#ffffff",
+              borderBottom: currentThemeType === "cat" && inputValue.trim() ? "3px solid #B45309" : "none",
+              boxShadow: currentThemeType === "cat" && inputValue.trim() ? "0 4px 12px rgba(245, 158, 11, 0.35)" : "none"
             }}
+            title="Send Message"
           >
-            <Send className="w-5 h-5" />
-          </button>
+            {currentThemeType === "cat" ? (
+              <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8,14 C6,14 4.5,12.5 4.5,10.5 C4.5,9.5 5.5,8.5 8,8.5 C10.5,8.5 11.5,9.5 11.5,10.5 C11.5,12.5 10,14 8,14 Z" />
+                <circle cx="4" cy="6" r="1.5" />
+                <circle cx="6.5" cy="4" r="1.5" />
+                <circle cx="9.5" cy="4" r="1.5" />
+                <circle cx="12" cy="6" r="1.5" />
+              </svg>
+            ) : (
+              <Send className="w-5 h-5" />
+            )}
+          </motion.button>
         </form>
       </footer>
 

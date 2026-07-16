@@ -16,6 +16,14 @@ interface MessageCardProps {
   formatTime: (isoString: string) => string;
 }
 
+const MiniCatBadge = () => (
+  <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-amber-100 border border-amber-200 shrink-0 select-none">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-2.5 h-2.5">
+      <path d="M4 11a8 8 0 0 0 16 0c0-1.5-.5-3.5-1.5-5.5L15.5 8H8.5L5.5 5.5C4.5 7.5 4 9.5 4 11z" />
+    </svg>
+  </span>
+);
+
 export default function MessageCard({
   msg,
   allMessages,
@@ -38,6 +46,8 @@ export default function MessageCard({
   const opacity = Math.min(Math.max(dragX, 0) / threshold, 1);
   const scale = 0.5 + Math.min(Math.max(dragX, 0) / threshold, 1) * 0.5;
   const isTriggered = dragX > threshold;
+
+  const isCat = theme.bg === "#FFF8F2";
 
   return (
     <div className="relative group w-full overflow-visible">
@@ -112,19 +122,29 @@ export default function MessageCard({
                 opacity: 1,
                 y: 0,
                 scale: [1, 1.02, 0.98, 1.01, 1],
-                borderColor: [isMe ? `${theme.accent}30` : theme.border, theme.accent, isMe ? `${theme.accent}30` : theme.border],
+                borderColor: [
+                  isCat 
+                    ? (isMe ? "#F9D7AC" : "#EFE3D3")
+                    : (isMe ? `${theme.accent}30` : theme.border), 
+                  theme.accent, 
+                  isCat 
+                    ? (isMe ? "#F9D7AC" : "#EFE3D3")
+                    : (isMe ? `${theme.accent}30` : theme.border)
+                ],
                 boxShadow: [
-                  "0px 0px 0px rgba(0,0,0,0)",
+                  isCat ? "0 4px 20px rgba(139, 126, 116, 0.08)" : "0px 0px 0px rgba(0,0,0,0)",
                   `0px 0px 14px ${theme.accent}40`,
-                  "0px 0px 0px rgba(0,0,0,0)"
+                  isCat ? "0 4px 20px rgba(139, 126, 116, 0.08)" : "0px 0px 0px rgba(0,0,0,0)"
                 ]
               }
             : { 
                 opacity: 1, 
                 y: 0, 
                 scale: 1,
-                borderColor: isMe ? `${theme.accent}30` : theme.border,
-                boxShadow: "0px 0px 0px rgba(0,0,0,0)"
+                borderColor: isCat
+                  ? (isMe ? "#F9D7AC" : "#EFE3D3")
+                  : (isMe ? `${theme.accent}30` : theme.border),
+                boxShadow: isCat ? "0 4px 20px rgba(139, 126, 116, 0.08)" : "0px 0px 0px rgba(0,0,0,0)"
               }
         }
         exit={{ opacity: 0 }}
@@ -133,9 +153,13 @@ export default function MessageCard({
             ? { duration: 1.2, ease: "easeInOut" }
             : { duration: 0.2 }
         }
-        className="p-4 rounded-2xl border transition-colors duration-300 z-10 relative select-text"
+        className={`p-4 border transition-all duration-300 z-10 relative select-text ${
+          isCat ? "rounded-[24px]" : "rounded-2xl"
+        }`}
         style={{
-          backgroundColor: isMe ? `${theme.accent}05` : theme.card,
+          backgroundColor: isCat
+            ? (isMe ? "#FFF0DB" : "#FCF8F2")
+            : (isMe ? `${theme.accent}05` : theme.card),
           marginLeft: isMe ? "2rem" : "0",
           marginRight: isMe ? "0" : "2rem"
         }}
@@ -180,9 +204,10 @@ export default function MessageCard({
         {/* Card Header: Sender Name & Time */}
         <div className="flex items-baseline justify-between mb-2 select-none">
           <span 
-            className="text-xs font-black uppercase tracking-wider"
+            className="text-xs font-black uppercase tracking-wider flex items-center gap-1"
             style={{ color: isMe ? theme.accent : theme.text }}
           >
+            {isCat && <MiniCatBadge />}
             {msg.sender}
           </span>
           <span className="text-[10px] font-mono opacity-40 pl-2" style={{ color: theme.text }}>

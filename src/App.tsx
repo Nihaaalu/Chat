@@ -14,7 +14,7 @@ export default function App() {
   // 1. Theme State
   const [currentTheme, setCurrentTheme] = useState<ThemeType>(() => {
     const saved = localStorage.getItem("chat_theme_selection");
-    return (saved as ThemeType) || "dark";
+    return (saved as ThemeType) || "cat";
   });
 
   const handleThemeChange = (newTheme: ThemeType) => {
@@ -478,7 +478,11 @@ export default function App() {
             }}
           >
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 flex-shrink-0" style={{ color: themeConfig.accent }} />
+              {currentTheme === "cat" ? (
+                <span className="text-lg flex-shrink-0 select-none">🐾</span>
+              ) : (
+                <ShieldCheck className="w-5 h-5 flex-shrink-0" style={{ color: themeConfig.accent }} />
+              )}
               <p className="text-xs font-semibold leading-relaxed">
                 {gracePeriodBanner}
               </p>
