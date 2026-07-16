@@ -1,5 +1,4 @@
-import React, { useState } from "react";
-import { motion } from "motion/react";
+import React from "react";
 import { ThemeConfig } from "../theme.js";
 import { MessageType } from "../types.js";
 import { CornerUpLeft } from "lucide-react";
@@ -34,7 +33,6 @@ export default function MessageCard({
   isHighlighted,
   formatTime
 }: MessageCardProps) {
-  const [dragX, setDragX] = useState(0);
   const isMe = msg.sender === nickname;
 
   // Find original message if it's a reply
@@ -42,36 +40,16 @@ export default function MessageCard({
     ? allMessages.find((m) => m.id === msg.replyToMessageId) 
     : null;
 
-  const threshold = 80;
-  const opacity = Math.min(Math.max(dragX, 0) / threshold, 1);
-  const scale = 0.5 + Math.min(Math.max(dragX, 0) / threshold, 1) * 0.5;
-  const isTriggered = dragX > threshold;
-
   const isCat = theme.bg === "#FFF8F2";
 
   return (
-    <div className="relative group w-full overflow-visible">
-      {/* Swipe background reveal: show reply icon on swipe right */}
-      <div 
-        className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none z-0" 
-        style={{ opacity }}
-      >
-        <motion.div 
-          animate={{ 
-            scale: isTriggered ? 1.25 : scale, 
-            color: isTriggered ? theme.accent : theme.textSecondary 
-          }}
-          transition={{ duration: 0.15 }}
-          className="p-2 rounded-full flex items-center justify-center"
-          style={{ backgroundColor: `${theme.border}40` }}
-        >
-          <CornerUpLeft className="w-4 h-4" />
-        </motion.div>
-      </div>
-
+    <div 
+      className="relative group w-full overflow-visible" 
+      style={{ height: "auto", minHeight: "unset" }}
+    >
       {/* Desktop hover Reply button */}
       <div 
-        className="absolute top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-250 z-10 hidden md:flex items-center pointer-events-none"
+        className="absolute top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-250 z-10 hidden md:flex items-center"
         style={{
           left: isMe ? "-40px" : "auto",
           right: isMe ? "auto" : "-40px"
@@ -92,81 +70,34 @@ export default function MessageCard({
       </div>
 
       {/* Main Message Card */}
-      <motion.div
+      <div
         id={`msg-${msg.id}`}
-        drag="x"
-        dragDirectionLock
-        dragConstraints={{ left: 0, right: 0 }}
-        dragElastic={{ right: 0.5, left: 0 }}
-        onDrag={(event, info) => {
-          // Only track positive drag (left to right)
-          if (info.offset.x > 0) {
-            setDragX(info.offset.x);
-          } else {
-            setDragX(0);
-          }
-        }}
-        onDragEnd={(event, info) => {
-          setDragX(0);
-          if (info.offset.x > threshold) {
-            if (window.navigator && window.navigator.vibrate) {
-              window.navigator.vibrate(10);
-            }
-            onReply(msg);
-          }
-        }}
-        initial={{ opacity: 0, y: 10 }}
-        animate={
-          isHighlighted 
-            ? {
-                opacity: 1,
-                y: 0,
-                scale: [1, 1.02, 0.98, 1.01, 1],
-                borderColor: [
-                  isCat 
-                    ? (isMe ? "#F9D7AC" : "#EFE3D3")
-                    : (isMe ? `${theme.accent}30` : theme.border), 
-                  theme.accent, 
-                  isCat 
-                    ? (isMe ? "#F9D7AC" : "#EFE3D3")
-                    : (isMe ? `${theme.accent}30` : theme.border)
-                ],
-                boxShadow: [
-                  isCat ? "0 4px 20px rgba(139, 126, 116, 0.08)" : "0px 0px 0px rgba(0,0,0,0)",
-                  `0px 0px 14px ${theme.accent}40`,
-                  isCat ? "0 4px 20px rgba(139, 126, 116, 0.08)" : "0px 0px 0px rgba(0,0,0,0)"
-                ]
-              }
-            : { 
-                opacity: 1, 
-                y: 0, 
-                scale: 1,
-                borderColor: isCat
-                  ? (isMe ? "#F9D7AC" : "#EFE3D3")
-                  : (isMe ? `${theme.accent}30` : theme.border),
-                boxShadow: isCat ? "0 4px 20px rgba(139, 126, 116, 0.08)" : "0px 0px 0px rgba(0,0,0,0)"
-              }
-        }
-        exit={{ opacity: 0 }}
-        transition={
-          isHighlighted 
-            ? { duration: 1.2, ease: "easeInOut" }
-            : { duration: 0.2 }
-        }
-        className={`p-4 border transition-all duration-300 z-10 relative select-text ${
+        className={`p-4 border transition-all duration-300 z-10 relative select-text flex flex-col justify-start ${
           isCat ? "rounded-[24px]" : "rounded-2xl"
-        }`}
+        } ${isHighlighted ? "ring-2" : ""}`}
         style={{
           backgroundColor: isCat
             ? (isMe ? "#FFF0DB" : "#FCF8F2")
             : (isMe ? `${theme.accent}05` : theme.card),
+          borderColor: isHighlighted 
+            ? theme.accent 
+            : (isCat 
+                ? (isMe ? "#F9D7AC" : "#EFE3D3") 
+                : (isMe ? `${theme.accent}30` : theme.border)),
+          boxShadow: isHighlighted
+            ? `0px 0px 14px ${theme.accent}40`
+            : (isCat ? "0 4px 20px rgba(139, 126, 116, 0.08)" : "0px 0px 0px rgba(0,0,0,0)"),
           marginLeft: isMe ? "2rem" : "0",
-          marginRight: isMe ? "0" : "2rem"
+          marginRight: isMe ? "0" : "2rem",
+          height: "auto",
+          minHeight: "unset",
+          flexGrow: 0,
+          flexShrink: 0
         }}
       >
         {/* Reply Header (if this message is a reply) */}
-        {msg.replyToMessageId && (
-          <div className="mb-2.5">
+        {msg.replyToMessageId && msg.replyToMessageId !== "null" && msg.replyToMessageId !== "undefined" && msg.replyToMessageId.trim() !== "" && (
+          <div className="mb-2.5 w-full block" style={{ height: "auto", minHeight: "unset" }}>
             {originalMsg ? (
               <div 
                 onClick={() => onReplyHeaderClick(msg.replyToMessageId!)}
@@ -174,10 +105,12 @@ export default function MessageCard({
                 style={{
                   borderLeftColor: theme.accent,
                   borderColor: theme.border,
-                  backgroundColor: `${theme.border}40`
+                  backgroundColor: `${theme.border}40`,
+                  height: "auto",
+                  minHeight: "unset"
                 }}
               >
-                <div className="flex items-center gap-1 font-black text-[10px] uppercase tracking-wider" style={{ color: theme.accent }}>
+                <div className="flex flex-row items-center gap-1 font-black text-[10px] uppercase tracking-wider" style={{ color: theme.accent }}>
                   <CornerUpLeft className="w-3 h-3" />
                   <span>{originalMsg.sender}</span>
                 </div>
@@ -187,11 +120,13 @@ export default function MessageCard({
               </div>
             ) : (
               <div 
-                className="p-2 rounded-xl border-l-[3px] flex items-center gap-1.5 italic opacity-60 text-xs select-none"
+                className="p-2 rounded-xl border-l-[3px] flex flex-row items-center gap-1.5 italic opacity-60 text-xs select-none"
                 style={{
                   borderLeftColor: theme.border,
                   borderColor: theme.border,
-                  backgroundColor: `${theme.border}20`
+                  backgroundColor: `${theme.border}20`,
+                  height: "auto",
+                  minHeight: "unset"
                 }}
               >
                 <CornerUpLeft className="w-3 h-3" style={{ color: theme.textSecondary }} />
@@ -202,9 +137,9 @@ export default function MessageCard({
         )}
 
         {/* Card Header: Sender Name & Time */}
-        <div className="flex items-baseline justify-between mb-2 select-none">
+        <div className="flex flex-row items-baseline justify-between mb-2 w-full select-none" style={{ height: "auto" }}>
           <span 
-            className="text-xs font-black uppercase tracking-wider flex items-center gap-1"
+            className="text-xs font-black uppercase tracking-wider flex flex-row items-center gap-1"
             style={{ color: isMe ? theme.accent : theme.text }}
           >
             {isCat && <MiniCatBadge />}
@@ -217,12 +152,12 @@ export default function MessageCard({
 
         {/* Card Body: Message */}
         <p 
-          className="text-sm leading-relaxed break-words whitespace-pre-wrap selection:bg-slate-300"
-          style={{ color: theme.text }}
+          className="text-sm leading-relaxed break-words whitespace-pre-wrap selection:bg-slate-300 w-full block text-left"
+          style={{ color: theme.text, height: "auto" }}
         >
           {msg.content}
         </p>
-      </motion.div>
+      </div>
     </div>
   );
 }

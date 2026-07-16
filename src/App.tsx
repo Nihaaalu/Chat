@@ -394,7 +394,7 @@ export default function App() {
       style={{ backgroundColor: themeConfig.bg, color: themeConfig.text }}
     >
       {currentTheme === "cat" && view === "home" && <CatBackground theme={themeConfig} />}
-      <div className="w-full max-w-[420px] min-h-screen px-4 flex flex-col justify-between py-6">
+      <div className={`w-full max-w-[420px] flex flex-col ${view === "chat" ? "h-screen overflow-hidden" : "min-h-screen px-4 justify-between py-6"}`}>
         
         {/* TOP THEME TOGGLE / SECURITY BADGE IN HOMEPAGE */}
         {view !== "chat" && (
@@ -410,7 +410,7 @@ export default function App() {
         )}
 
         {/* WORKSPACE AREA with slide transitions */}
-        <div className="flex-1 flex flex-col justify-center">
+        <div className={`flex flex-col ${view === "chat" ? "h-full w-full overflow-hidden" : "flex-1 justify-center"}`}>
           <AnimatePresence mode="wait">
             {view === "home" && (
               <motion.div

@@ -134,6 +134,60 @@ export default function ChatView({
   registerUnsubscribe
 }: ChatViewProps) {
   const [messages, setMessages] = useState<MessageType[]>([]);
+
+  // STEP 1 & STEP 2: Process, sanitize, and log Firestore documents
+  const processFetchedMessages = (rawMsgs: MessageType[]) => {
+    // Check if Firestore contains documents with empty text, null values, typical placeholders, or SYSTEM messages.
+    // We want a pure continuous chat feed exactly like WhatsApp or Instagram, so we exclude SYSTEM messages completely.
+    const filtered = rawMsgs.filter(m => {
+      if (!m || !m.id || !m.content) return false;
+      const content = m.content.trim();
+      if (content === "") return false;
+
+      // Filter out typical placeholders
+      const lowerContent = content.toLowerCase();
+      if (
+        lowerContent === "null" ||
+        lowerContent === "undefined" ||
+        lowerContent === "date_separator" ||
+        lowerContent === "reply_placeholder" ||
+        lowerContent === "deleted_message"
+      ) {
+        return false;
+      }
+
+      // Filter out SYSTEM notifications to guarantee a 100% clean and flat continuous chat feed with no layout space from them
+      if (m.sender === "SYSTEM" || m.sender === "system") {
+        return false;
+      }
+
+      return true;
+    });
+
+    // Ensure no duplicates
+    const uniqueMap = new Map<string, MessageType>();
+    filtered.forEach(m => {
+      uniqueMap.set(m.id, m);
+    });
+    const unique = Array.from(uniqueMap.values());
+
+    // Ensure strict chronological sort by createdAt ascending
+    const sorted = unique.sort((a, b) => {
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+
+    // Log every Firestore document after loading (console.table)
+    console.log("Firestore documents after loading:");
+    console.table(sorted.map(m => ({
+      id: m.id,
+      sender: m.sender,
+      text: m.content,
+      timestamp: m.createdAt,
+      replyToMessageId: m.replyToMessageId || "none"
+    })));
+
+    return sorted;
+  };
   const [participants, setParticipants] = useState<{ id: string; name: string; joinedAt: string }[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [connected, setConnected] = useState(false);
@@ -319,7 +373,8 @@ export default function ChatView({
         isInitial = false;
       }
 
-      setMessages(msgs);
+      const processedMsgs = processFetchedMessages(msgs);
+      setMessages(processedMsgs);
       scrollToBottom();
     }, (err) => {
       console.error("Messages subcollection snapshot error:", err);
@@ -363,7 +418,8 @@ export default function ChatView({
           replyToMessageId: data.replyToMessageId || undefined
         });
       });
-      setMessages(msgs);
+      const processedMsgs = processFetchedMessages(msgs);
+      setMessages(processedMsgs);
       scrollToBottom();
     } catch (err) {
       console.error("Manual refresh messages failed:", err);
@@ -416,7 +472,7 @@ export default function ChatView({
   };
 
   return (
-    <div className="flex flex-col min-h-screen relative overflow-hidden">
+    <div className="flex flex-col h-full w-full relative overflow-hidden">
       {/* Background pattern for Cat Theme */}
       {currentThemeType === "cat" && (
         <>
@@ -591,85 +647,74 @@ export default function ChatView({
       </div>
 
       {/* MESSAGE LIST */}
-      <main className={`flex-1 overflow-y-auto px-1 pt-4 pb-28 ${currentThemeType === "cat" ? "cat-scrollbar" : ""}`}>
-        <div className="flex flex-col gap-3.5">
-          {messages.length === 0 ? (
-            currentThemeType === "cat" ? (
-              <div className="flex flex-col items-center justify-center py-20 text-center px-6 select-none z-10">
-                <SleepingCatIllustration />
-                <h3 className="text-sm font-bold mb-1 text-amber-900">
-                  No conversations yet.
-                </h3>
-                <p className="text-xs leading-relaxed max-w-xs opacity-70 text-amber-800/70">
-                  Start your conversation.
-                </p>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-                <div 
-                  className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4 opacity-50"
-                  style={{ backgroundColor: `${theme.accent}15` }}
-                >
-                  <Users className="w-6 h-6" style={{ color: theme.accent }} />
-                </div>
-                <h3 className="text-sm font-semibold mb-1" style={{ color: theme.text }}>
-                  Vault Active & Secured
-                </h3>
-                <p className="text-xs leading-relaxed max-w-xs" style={{ color: theme.textSecondary }}>
-                  All correspondence is highly secure and temporary. State is destroyed once you disconnect.
-                </p>
-              </div>
-            )
-          ) : (
-            <AnimatePresence initial={false}>
-              {messages.map((msg) => {
-                const isSystem = msg.sender === "SYSTEM";
-                
-                if (isSystem) {
-                  return (
-                    <motion.div
-                      key={msg.id}
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className={
-                        currentThemeType === "cat"
-                          ? "flex items-center justify-center gap-1.5 py-1.5 px-5 text-[10px] font-semibold rounded-full border text-center my-2 max-w-[85%] mx-auto shadow-[0_2px_8px_rgba(139,126,116,0.04)]"
-                          : "flex items-center justify-center gap-1.5 py-1.5 px-4 text-[10px] font-bold rounded-xl border text-center my-1"
-                      }
-                      style={{
-                        borderColor: currentThemeType === "cat" ? "#F5D7A1" : theme.border,
-                        backgroundColor: currentThemeType === "cat" ? "#FFFDF5" : `${theme.card}80`,
-                        color: currentThemeType === "cat" ? "#8B7E74" : theme.textSecondary
-                      }}
-                    >
-                      {currentThemeType === "cat" ? (
-                        <span className="text-xs select-none">🐾</span>
-                      ) : (
-                        <ShieldAlert className="w-3.5 h-3.5 opacity-60" style={{ color: theme.accent }} />
-                      )}
-                      <span>{msg.content}</span>
-                    </motion.div>
-                  );
-                }
+      <main 
+        className={`flex-1 px-1 pt-4 pb-28 ${currentThemeType === "cat" ? "cat-scrollbar" : ""}`}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "flex-start",
+          alignItems: "stretch",
+          gap: "12px",
+          overflowY: "auto"
+        }}
+      >
+        {/* STEP 3: Log messages.length immediately before rendering */}
+        {(() => {
+          console.log("Immediately before rendering, messages count is:", messages.length);
+          return null;
+        })()}
 
-                return (
-                  <MessageCard
-                    key={msg.id}
-                    msg={msg}
-                    allMessages={messages}
-                    nickname={nickname}
-                    theme={theme}
-                    onReply={(targetMsg) => setReplyingTo(targetMsg)}
-                    onReplyHeaderClick={handleReplyHeaderClick}
-                    isHighlighted={highlightedMessageId === msg.id}
-                    formatTime={formatTime}
-                  />
-                );
-              })}
-            </AnimatePresence>
-          )}
-          <div ref={messageEndRef} />
-        </div>
+        {messages.length === 0 ? (
+          currentThemeType === "cat" ? (
+            <div 
+              className="flex flex-col items-center justify-center py-20 text-center px-6 select-none z-10 w-full" 
+              style={{ height: "auto" }}
+            >
+              <SleepingCatIllustration />
+              <h3 className="text-sm font-bold mb-1 text-amber-900">
+                No conversations yet.
+              </h3>
+              <p className="text-xs leading-relaxed max-w-xs opacity-70 text-amber-800/70">
+                Start your conversation.
+              </p>
+            </div>
+          ) : (
+            <div 
+              className="flex flex-col items-center justify-center py-16 text-center px-6 w-full" 
+              style={{ height: "auto" }}
+            >
+              <div 
+                className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4 opacity-50"
+                style={{ backgroundColor: `${theme.accent}15` }}
+              >
+                <Users className="w-6 h-6" style={{ color: theme.accent }} />
+              </div>
+              <h3 className="text-sm font-semibold mb-1" style={{ color: theme.text }}>
+                Vault Active & Secured
+              </h3>
+              <p className="text-xs leading-relaxed max-w-xs" style={{ color: theme.textSecondary }}>
+                All correspondence is highly secure and temporary. State is destroyed once you disconnect.
+              </p>
+            </div>
+          )
+        ) : (
+          messages.map((msg) => {
+            return (
+              <MessageCard
+                key={msg.id}
+                msg={msg}
+                allMessages={messages}
+                nickname={nickname}
+                theme={theme}
+                onReply={(targetMsg) => setReplyingTo(targetMsg)}
+                onReplyHeaderClick={handleReplyHeaderClick}
+                isHighlighted={highlightedMessageId === msg.id}
+                formatTime={formatTime}
+              />
+            );
+          })
+        )}
+        <div ref={messageEndRef} style={{ height: 0, minHeight: 0, flexShrink: 0 }} />
       </main>
 
       {/* BOTTOM INPUT FOOTER */}
