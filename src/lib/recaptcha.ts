@@ -58,6 +58,12 @@ export function executeRecaptcha(action: string): Promise<string> {
  * Firebase Cloud Function, falling back to local Express proxy for AI Studio local preview.
  */
 export async function runVerification(action: string): Promise<void> {
+  // Client-side dev mode bypass as suggested
+  if (import.meta.env.DEV) {
+    console.log(`[Dev Bypass] Client bypassed reCAPTCHA for action: ${action}`);
+    return;
+  }
+
   let token: string;
   try {
     token = await executeRecaptcha(action);

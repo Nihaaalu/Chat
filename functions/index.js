@@ -80,7 +80,7 @@ exports.verifyRecaptcha = onCall(async (request) => {
 
     // 4. Compare assessment risk score against security threshold
     const score = assessment.riskAnalysis ? (assessment.riskAnalysis.score ?? 0) : 0;
-    const threshold = THRESHOLDS[action] ?? 0.5;
+    const threshold = 0.3;
 
     if (score < threshold) {
       return {

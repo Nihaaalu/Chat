@@ -96,6 +96,12 @@ app.post("/api/verify-recaptcha", async (req, res) => {
       return res.status(400).json({ success: false, error: "action is required" });
     }
 
+    // Dev bypass check
+    if (process.env.NODE_ENV !== "production") {
+      console.log(`[Dev Bypass] reCAPTCHA verify bypassed for action: ${action}`);
+      return res.json({ success: true, score: 0.9, details: "Dev mode bypass" });
+    }
+
     const verification = await verifyRecaptchaToken(token, action);
 
     // 1. Reject invalid or expired tokens
@@ -118,9 +124,9 @@ app.post("/api/verify-recaptcha", async (req, res) => {
       });
     }
 
-    // 3. Reject low risk scores based on action-specific threshold
+    // 3. Reject low risk scores based on threshold 0.3
     const score = verification.riskAnalysis?.score ?? 0;
-    const threshold = THRESHOLDS[action] ?? 0.5;
+    const threshold = 0.3;
 
     if (score < threshold) {
       return res.status(403).json({
