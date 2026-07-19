@@ -10,7 +10,7 @@ import CatBackground from "./components/CatBackground.js";
 import { Shield, ShieldCheck, X } from "lucide-react";
 import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, deleteField, getDocs, deleteDoc } from "firebase/firestore";
-import { db, auth, handleFirestoreError, OperationType } from "./lib/firebase.js";
+import { db, auth, handleFirestoreError, OperationType, initError, missingEnvVars } from "./lib/firebase.js";
 
 async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -22,6 +22,72 @@ async function hashPassword(password: string): Promise<string> {
 }
 
 export default function App() {
+  if (initError) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-slate-100 font-sans selection:bg-rose-500/30 selection:text-rose-200">
+        <div className="w-full max-w-lg bg-slate-900 border border-slate-800/80 rounded-2xl p-8 shadow-2xl relative overflow-hidden backdrop-blur-md">
+          {/* Subtle ambient light behind */}
+          <div className="absolute -top-24 -left-24 w-48 h-48 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-violet-500/10 rounded-full blur-3xl pointer-events-none" />
+
+          {/* Logo / Header */}
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-rose-500/10 border border-rose-500/20 text-rose-500">
+              <Shield className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <h1 className="text-lg font-black tracking-wider uppercase text-slate-100">Setup Required</h1>
+              <p className="text-[10px] uppercase font-mono tracking-widest text-slate-500">Firebase & App Check config</p>
+            </div>
+          </div>
+
+          <p className="text-sm leading-relaxed text-slate-400 mb-6">
+            The application's connection to Firebase services is currently not configured or failed to initialize. Please define the required environment variables.
+          </p>
+
+          {/* Checklist */}
+          <div className="space-y-3 mb-8 bg-slate-950/50 rounded-xl p-4 border border-slate-800/40">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 mb-2">Required Variables</h3>
+            {[
+              "VITE_FIREBASE_API_KEY",
+              "VITE_FIREBASE_AUTH_DOMAIN",
+              "VITE_FIREBASE_PROJECT_ID",
+              "VITE_FIREBASE_STORAGE_BUCKET",
+              "VITE_FIREBASE_MESSAGING_SENDER_ID",
+              "VITE_FIREBASE_APP_ID"
+            ].map((v) => {
+              const isMissing = missingEnvVars.includes(v);
+              return (
+                <div key={v} className="flex items-center justify-between text-xs font-mono">
+                  <span className={isMissing ? "text-slate-500 line-through" : "text-rose-400"}>{v}</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${isMissing ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"}`}>
+                    {isMissing ? "Missing" : "Configured"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Instructions */}
+          <div className="text-xs space-y-2 text-slate-400 border-t border-slate-800/80 pt-6 font-mono">
+            <div className="flex items-start gap-2">
+              <span className="text-rose-500 font-bold">1.</span>
+              <span>Open the <span className="text-slate-200 underline font-bold">Settings</span> menu at the top or bottom of the window.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-rose-500 font-bold">2.</span>
+              <span>Input your Firebase credentials under <span className="text-slate-200 font-bold">Secrets / Env Variables</span>.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="text-rose-500 font-bold">3.</span>
+              <span>The application will automatically reload and connect securely.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // 1. Theme States (separated by section)
   const [homeTheme, setHomeTheme] = useState<ThemeType>(() => {
     const saved = localStorage.getItem("chat_home_theme");

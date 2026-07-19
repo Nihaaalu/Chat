@@ -1,3 +1,6 @@
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { app } from "./firebase.js";
+
 declare global {
   interface Window {
     grecaptcha: any;
@@ -5,6 +8,19 @@ declare global {
 }
 
 const SITE_KEY = "6LcV9FotAAAAAG-WC6mATFYjJMTOfoFmT76oRaa0";
+
+/**
+ * Initialize the Firebase Cloud Function reference safely
+ */
+let verifyRecaptchaFn: any = null;
+try {
+  if (app) {
+    const functions = getFunctions(app);
+    verifyRecaptchaFn = httpsCallable(functions, "verifyRecaptcha");
+  }
+} catch (err) {
+  console.warn("Firebase Functions failed to initialize, will use local proxy fallback:", err);
+}
 
 /**
  * Executes reCAPTCHA Enterprise for the given action and returns a fresh token.
@@ -37,8 +53,9 @@ export function executeRecaptcha(action: string): Promise<string> {
 }
 
 /**
- * Helper to execute reCAPTCHA Enterprise and immediately verify it against the backend.
- * Throws a friendly error message if verification fails.
+ * Helper to execute reCAPTCHA Enterprise and immediately verify it.
+ * This conforms to the production architecture by calling the verifyRecaptcha()
+ * Firebase Cloud Function, falling back to local Express proxy for AI Studio local preview.
  */
 export async function runVerification(action: string): Promise<void> {
   let token: string;
@@ -49,6 +66,24 @@ export async function runVerification(action: string): Promise<void> {
     throw new Error(`Security check failed to initialize: ${errMsg}`);
   }
 
+  // Production: Try calling the Firebase Cloud Function first
+  if (verifyRecaptchaFn) {
+    try {
+      const response: any = await verifyRecaptchaFn({ token, action });
+      const data = response.data;
+      if (data && typeof data === "object") {
+        if (!data.success) {
+          throw new Error(data.details || data.error || "reCAPTCHA validation rejected.");
+        }
+        return; // Success! Authorized via Firebase Cloud Function
+      }
+    } catch (cfErr: any) {
+      console.warn("Cloud Function verification failed or not deployed, falling back to local Express proxy:", cfErr);
+      // Fallback to Express proxy in development environment so the preview doesn't break
+    }
+  }
+
+  // Local/Fallback: Verify against local Express proxy
   const response = await fetch("/api/verify-recaptcha", {
     method: "POST",
     headers: {
