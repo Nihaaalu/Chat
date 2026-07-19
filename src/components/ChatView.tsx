@@ -108,8 +108,8 @@ const SleepingCatIllustration = () => (
   </div>
 );
 
-import { collection, doc, query, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs, updateDoc, getDoc, setDoc } from "firebase/firestore";
-import { db, handleFirestoreError, OperationType } from "../lib/firebase.js";
+import { query, orderBy, serverTimestamp } from "firebase/firestore";
+import { db, handleFirestoreError, OperationType, collection, doc, onSnapshot, addDoc, getDocs, updateDoc, getDoc, setDoc } from "../lib/firebase.js";
 import ThemeSelector from "./ThemeSelector.js";
 import MessageCard from "./MessageCard.js";
 

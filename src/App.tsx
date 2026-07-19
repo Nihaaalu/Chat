@@ -9,8 +9,8 @@ import ThemeSelector from "./components/ThemeSelector.js";
 import CatBackground from "./components/CatBackground.js";
 import { Shield, ShieldCheck, X } from "lucide-react";
 import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, deleteField, getDocs, deleteDoc } from "firebase/firestore";
-import { db, auth, handleFirestoreError, OperationType, initError, missingEnvVars } from "./lib/firebase.js";
+import { serverTimestamp, deleteField } from "firebase/firestore";
+import { db, auth, handleFirestoreError, OperationType, initError, missingEnvVars, doc, getDoc, setDoc, updateDoc, collection, addDoc, getDocs, deleteDoc } from "./lib/firebase.js";
 
 async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder();

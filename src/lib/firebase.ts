@@ -1,5 +1,16 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { 
+  getFirestore,
+  doc as firestoreDoc,
+  collection as firestoreCollection,
+  getDoc as firestoreGetDoc,
+  getDocs as firestoreGetDocs,
+  setDoc as firestoreSetDoc,
+  updateDoc as firestoreUpdateDoc,
+  addDoc as firestoreAddDoc,
+  deleteDoc as firestoreDeleteDoc,
+  onSnapshot as firestoreOnSnapshot
+} from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 
@@ -127,4 +138,97 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
+}
+
+// Wrapped Firestore functions with detailed pre-request diagnostics
+export function doc(database: any, path: string, ...pathSegments: string[]): any {
+  const finalPath = [path, ...pathSegments].filter(Boolean).join("/");
+  const uid = auth?.currentUser?.uid || "unauthenticated";
+  console.log(`[Firestore Pre-Request] Operation: doc | Path: ${finalPath} | Auth UID: ${uid}`);
+  // @ts-ignore
+  return firestoreDoc(database, path, ...pathSegments);
+}
+
+export function collection(database: any, path: string, ...pathSegments: string[]): any {
+  const finalPath = [path, ...pathSegments].filter(Boolean).join("/");
+  const uid = auth?.currentUser?.uid || "unauthenticated";
+  console.log(`[Firestore Pre-Request] Operation: collection | Path: ${finalPath} | Auth UID: ${uid}`);
+  // @ts-ignore
+  return firestoreCollection(database, path, ...pathSegments);
+}
+
+export async function getDoc(reference: any): Promise<any> {
+  const uid = auth?.currentUser?.uid || "unauthenticated";
+  console.log(`[Firestore Request] Operation: getDoc | Path: ${reference?.path} | Auth UID: ${uid}`);
+  try {
+    return await firestoreGetDoc(reference);
+  } catch (err) {
+    console.error(`[Firestore Error] getDoc on ${reference?.path} failed:`, err);
+    throw err;
+  }
+}
+
+export async function getDocs(reference: any): Promise<any> {
+  const uid = auth?.currentUser?.uid || "unauthenticated";
+  console.log(`[Firestore Request] Operation: getDocs | Path: ${reference?.path || "query"} | Auth UID: ${uid}`);
+  try {
+    return await firestoreGetDocs(reference);
+  } catch (err) {
+    console.error(`[Firestore Error] getDocs failed:`, err);
+    throw err;
+  }
+}
+
+export async function setDoc(reference: any, data: any, options?: any): Promise<any> {
+  const uid = auth?.currentUser?.uid || "unauthenticated";
+  console.log(`[Firestore Request] Operation: setDoc | Path: ${reference?.path} | Auth UID: ${uid}`);
+  try {
+    if (options) {
+      return await firestoreSetDoc(reference, data, options);
+    }
+    return await firestoreSetDoc(reference, data);
+  } catch (err) {
+    console.error(`[Firestore Error] setDoc on ${reference?.path} failed:`, err);
+    throw err;
+  }
+}
+
+export async function updateDoc(reference: any, data: any): Promise<any> {
+  const uid = auth?.currentUser?.uid || "unauthenticated";
+  console.log(`[Firestore Request] Operation: updateDoc | Path: ${reference?.path} | Auth UID: ${uid}`);
+  try {
+    return await firestoreUpdateDoc(reference, data);
+  } catch (err) {
+    console.error(`[Firestore Error] updateDoc on ${reference?.path} failed:`, err);
+    throw err;
+  }
+}
+
+export async function addDoc(reference: any, data: any): Promise<any> {
+  const uid = auth?.currentUser?.uid || "unauthenticated";
+  console.log(`[Firestore Request] Operation: addDoc | Path: ${reference?.path || "collection"} | Auth UID: ${uid}`);
+  try {
+    return await firestoreAddDoc(reference, data);
+  } catch (err) {
+    console.error(`[Firestore Error] addDoc failed:`, err);
+    throw err;
+  }
+}
+
+export async function deleteDoc(reference: any): Promise<any> {
+  const uid = auth?.currentUser?.uid || "unauthenticated";
+  console.log(`[Firestore Request] Operation: deleteDoc | Path: ${reference?.path} | Auth UID: ${uid}`);
+  try {
+    return await firestoreDeleteDoc(reference);
+  } catch (err) {
+    console.error(`[Firestore Error] deleteDoc on ${reference?.path} failed:`, err);
+    throw err;
+  }
+}
+
+export function onSnapshot(reference: any, ...args: any[]): any {
+  const uid = auth?.currentUser?.uid || "unauthenticated";
+  console.log(`[Firestore Request] Operation: onSnapshot | Path: ${reference?.path || "query"} | Auth UID: ${uid}`);
+  // @ts-ignore
+  return firestoreOnSnapshot(reference, ...args);
 }

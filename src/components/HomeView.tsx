@@ -2,8 +2,7 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ThemeConfig } from "../theme.js";
 import { MessageSquare, Key, User, LogIn, Lock, RefreshCw, Shield, Users, ArrowLeft, Copy, Check } from "lucide-react";
-import { doc, setDoc, getDoc } from "firebase/firestore";
-import { db, auth } from "../lib/firebase.js";
+import { db, auth, doc, setDoc, getDoc } from "../lib/firebase.js";
 import { runVerification } from "../lib/recaptcha.js";
 
 // Lightweight animated cat paw loader

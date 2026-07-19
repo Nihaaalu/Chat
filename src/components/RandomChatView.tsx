@@ -1,22 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
-  collection, 
-  doc, 
   query, 
   orderBy, 
-  onSnapshot, 
-  addDoc, 
-  getDocs, 
-  deleteDoc, 
-  setDoc, 
-  updateDoc, 
   serverTimestamp,
   runTransaction,
   where,
   limit
 } from "firebase/firestore";
-import { auth, db } from "../lib/firebase.js";
+import { auth, db, collection, doc, onSnapshot, addDoc, getDocs, deleteDoc, setDoc, updateDoc } from "../lib/firebase.js";
 import { onAuthStateChanged } from "firebase/auth";
 import { ArrowLeft, Send, RefreshCw, MessageSquare } from "lucide-react";
 import { ThemeConfig } from "../theme.js";
@@ -272,8 +264,8 @@ export default function RandomChatView({ theme, onLeave }: RandomChatViewProps) 
                 throw new Error("One of the queue documents does not exist");
               }
 
-              const myData = myDoc.data();
-              const partnerData = partnerDoc.data();
+              const myData = myDoc.data() as any;
+              const partnerData = partnerDoc.data() as any;
 
               if (myData.status !== "waiting") {
                 throw new Error("I am no longer waiting");
