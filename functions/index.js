@@ -19,7 +19,14 @@ const THRESHOLDS = {
  * Verifies token validity, matches action name, compares risk score with safety thresholds, 
  * and returns allow/deny evaluation results.
  */
-exports.verifyRecaptcha = onCall(async (request) => {
+exports.verifyRecaptcha = onCall({
+  cors: [
+    "https://chat-ebon-phi-32.vercel.app",
+    "https://ais-dev-fnsteqb3uuwe2o7lro3q4g-380669840049.asia-southeast1.run.app",
+    "https://ais-pre-fnsteqb3uuwe2o7lro3q4g-380669840049.asia-southeast1.run.app",
+    /https:\/\/ais-(dev|pre)-[a-z0-9-]+\.[a-z0-9-]+\.run\.app$/
+  ]
+}, async (request) => {
   const data = request.data || {};
   const { token, action } = data;
 
