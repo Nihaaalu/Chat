@@ -12,7 +12,6 @@ import {
   onSnapshot as firestoreOnSnapshot
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
-import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -48,10 +47,7 @@ export const isFirebaseConfigured = missingEnvVars.length === 0;
 export let app: any = null;
 export let db: any = null;
 export let auth: any = null;
-export let appCheck: any = null;
 export let initError: string | null = null;
-export let appCheckInitError: string | null = null;
-export let appCheckStatus: "success" | "failed" | "uninitialized" = "uninitialized";
 
 if (isFirebaseConfigured) {
   try {
@@ -61,30 +57,6 @@ if (isFirebaseConfigured) {
 
     db = getFirestore(app, databaseId);
     auth = getAuth(app);
-
-    // Initialize App Check gracefully after Firebase initialized
-    try {
-      if (typeof window !== "undefined") {
-        const siteKey = "6LcV9FotAAAAAG-WC6mATFYjJMTOfoFmT76oRaa0";
-        console.log("=== Firebase App Check Startup Diagnostics ===");
-        console.log("Firebase App Name:", app?.name);
-        console.log("App Check Site Key:", siteKey);
-        console.log("Provider Type: ReCaptchaEnterpriseProvider");
-        console.log("Hostname:", window.location.hostname);
-        console.log("===============================================");
-
-        appCheck = initializeAppCheck(app, {
-          provider: new ReCaptchaEnterpriseProvider(siteKey),
-          isTokenAutoRefreshEnabled: true,
-        });
-        appCheckStatus = "success";
-        console.log("Firebase App Check initialized successfully.");
-      }
-    } catch (err: any) {
-      appCheckStatus = "failed";
-      appCheckInitError = err instanceof Error ? err.message : String(err);
-      console.error("Firebase App Check failed to initialize:", err);
-    }
   } catch (error: any) {
     initError = error instanceof Error ? error.message : String(error);
     console.error("Firebase initialization failed:", error);

@@ -1,69 +1,10 @@
-import { getFunctions, httpsCallable } from "firebase/functions";
-import { app } from "./firebase.js";
-
-declare global {
-  interface Window {
-    grecaptcha: any;
-  }
-}
-
-const SITE_KEY = "6LcV9FotAAAAAG-WC6mATFYjJMTOfoFmT76oRaa0";
-
 /**
- * Initialize the Firebase Cloud Function reference safely
+ * reCAPTCHA Verification Bypass
+ * All verification requirements have been deactivated as requested.
  */
-let verifyRecaptchaFn: any = null;
-try {
-  if (app) {
-    const functions = getFunctions(app);
-    verifyRecaptchaFn = httpsCallable(functions, "verifyRecaptcha");
-  }
-} catch (err) {
-  console.warn("Firebase Functions failed to initialize, will use local proxy fallback:", err);
-}
 
-/**
- * Executes reCAPTCHA Enterprise for the given action and returns a fresh token.
- */
-export function executeRecaptcha(action: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === "undefined") {
-      return reject(new Error("window is not defined"));
-    }
-
-    const grecaptcha = window.grecaptcha;
-    if (!grecaptcha || !grecaptcha.enterprise) {
-      return reject(
-        new Error("reCAPTCHA Enterprise is still loading. Please try again in a moment.")
-      );
-    }
-
-    grecaptcha.enterprise.ready(async () => {
-      try {
-        const token = await grecaptcha.enterprise.execute(SITE_KEY, { action });
-        if (!token) {
-          return reject(new Error("reCAPTCHA execution returned an empty token."));
-        }
-        resolve(token);
-      } catch (err) {
-        reject(err);
-      }
-    });
-  });
-}
-
-/**
- * Helper to execute reCAPTCHA Enterprise and immediately verify it.
- * This conforms to the production architecture by calling the verifyRecaptcha()
- * Firebase Cloud Function, falling back to local Express proxy for AI Studio local preview.
- */
-/**
- * Helper to execute reCAPTCHA Enterprise and immediately verify it.
- * This conforms to the production architecture by calling the verifyRecaptcha()
- * Firebase Cloud Function.
- */
 export async function runVerification(action: string): Promise<any> {
-  console.log(`[Bypass] Bypassing reCAPTCHA verification for action: ${action}`);
+  console.log(`[Bypass] Bypassing verification for action: ${action}`);
   return {
     success: true,
     score: 1.0,
