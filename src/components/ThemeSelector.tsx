@@ -4,15 +4,20 @@ import { themes } from "../theme.js";
 interface ThemeSelectorProps {
   currentTheme: ThemeType;
   onThemeChange: (theme: ThemeType) => void;
+  allowedThemes?: ThemeType[];
 }
 
-export default function ThemeSelector({ currentTheme, onThemeChange }: ThemeSelectorProps) {
+export default function ThemeSelector({ currentTheme, onThemeChange, allowedThemes }: ThemeSelectorProps) {
   const options: { value: ThemeType; label: string; tooltip: string }[] = [
     { value: "dark", label: "🌙", tooltip: "Dark Theme" },
     { value: "light", label: "☀️", tooltip: "Light Theme" },
     { value: "pink", label: "🌸", tooltip: "Pink Theme" },
     { value: "cat", label: "🐈", tooltip: "Cat Theme" }
   ];
+
+  const filteredOptions = allowedThemes
+    ? options.filter((opt) => allowedThemes.includes(opt.value))
+    : options;
 
   const config = themes[currentTheme];
 
@@ -21,7 +26,7 @@ export default function ThemeSelector({ currentTheme, onThemeChange }: ThemeSele
       className="flex items-center gap-1.5 p-1 rounded-full border transition-all duration-300"
       style={{ borderColor: config.border, backgroundColor: config.card }}
     >
-      {options.map((opt) => {
+      {filteredOptions.map((opt) => {
         const isActive = currentTheme === opt.value;
         return (
           <button

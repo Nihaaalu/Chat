@@ -30,6 +30,15 @@
         "timestamp": {
           "type": "object",
           "description": "Firestore server timestamp of when the message was sent"
+        },
+        "replyToMessageId": {
+          "type": "string",
+          "description": "Optional message ID being replied to",
+          "maxLength": 100
+        },
+        "reactions": {
+          "type": "object",
+          "description": "Reactions map of emoji to list of user IDs"
         }
       },
       "required": ["sender", "text", "timestamp"]
@@ -46,16 +55,125 @@
         }
       },
       "required": ["passphraseHash"]
+    },
+    "PrivateRoom": {
+      "title": "Private Room",
+      "description": "Represents a temporary private chat room",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "The 6-digit numeric room code",
+          "maxLength": 6
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Timestamp when the room was created"
+        },
+        "expiresAt": {
+          "type": "number",
+          "description": "Timestamp when the room expires"
+        },
+        "owner": {
+          "type": "string",
+          "description": "The UID of the room creator"
+        },
+        "members": {
+          "type": "object",
+          "description": "Map of user UIDs to their role (user1 or user2)"
+        },
+        "typing": {
+          "type": "object",
+          "description": "Map of usernames to typing boolean state"
+        },
+        "pinnedMessageId": {
+          "type": "string",
+          "description": "The ID of the pinned message",
+          "maxLength": 100
+        }
+      },
+      "required": ["code", "createdAt", "expiresAt", "owner", "members"]
+    },
+    "RandomQueueItem": {
+      "title": "Random Queue Item",
+      "description": "Represents a user waiting in the matchmaking queue",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The UID of the waiting user"
+        },
+        "createdAt": {
+          "type": "object",
+          "description": "Firestore server timestamp of when the user joined the queue"
+        },
+        "matchedSessionId": {
+          "type": "string",
+          "description": "The ID of the session the user has been matched with",
+          "maxLength": 100
+        }
+      },
+      "required": ["uid", "createdAt", "matchedSessionId"]
+    },
+    "RandomSession": {
+      "title": "Random Session",
+      "description": "Represents an active temporary random chat session between two users",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The session ID",
+          "maxLength": 100
+        },
+        "members": {
+          "type": "array",
+          "description": "List of the two user UIDs"
+        },
+        "createdAt": {
+          "type": "object",
+          "description": "Firestore server timestamp when the session was created"
+        },
+        "status": {
+          "type": "string",
+          "description": "The current status of the session",
+          "enum": ["active", "disconnected"]
+        },
+        "typing": {
+          "type": "object",
+          "description": "Map of user UIDs to typing boolean state"
+        }
+      },
+      "required": ["id", "members", "createdAt", "status"]
     }
   },
   "firestore": {
     "/chat/{roomCode}": {
       "schema": "ChatRoom",
-      "description": "Access point for the chat room"
+      "description": "Access point for permanent chat rooms"
     },
     "/chat/{roomCode}/messages/{messageId}": {
       "schema": "ChatMessage",
-      "description": "Messages subcollection"
+      "description": "Messages subcollection for permanent rooms"
+    },
+    "/privateRooms/{roomCode}": {
+      "schema": "PrivateRoom",
+      "description": "Access point for custom temporary private rooms"
+    },
+    "/privateRooms/{roomCode}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Messages subcollection for temporary private rooms"
+    },
+    "/randomQueue/{uid}": {
+      "schema": "RandomQueueItem",
+      "description": "The matchmaking queue"
+    },
+    "/randomSessions/{sessionId}": {
+      "schema": "RandomSession",
+      "description": "Active temporary random chat sessions"
+    },
+    "/randomSessions/{sessionId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Messages subcollection for temporary random sessions"
     },
     "/config/security": {
       "schema": "SecurityConfig",

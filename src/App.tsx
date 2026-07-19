@@ -4,28 +4,65 @@ import { ThemeType } from "./types.js";
 import { themes } from "./theme.js";
 import HomeView from "./components/HomeView.js";
 import ChatView from "./components/ChatView.js";
+import RandomChatView from "./components/RandomChatView.js";
 import ThemeSelector from "./components/ThemeSelector.js";
 import CatBackground from "./components/CatBackground.js";
 import { Shield, ShieldCheck, X } from "lucide-react";
-import { doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, deleteField } from "firebase/firestore";
-import { db, handleFirestoreError, OperationType } from "./lib/firebase.js";
+import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, deleteField, getDocs, deleteDoc } from "firebase/firestore";
+import { db, auth, handleFirestoreError, OperationType } from "./lib/firebase.js";
+
+async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashHex;
+}
 
 export default function App() {
-  // 1. Theme State
-  const [currentTheme, setCurrentTheme] = useState<ThemeType>(() => {
-    const saved = localStorage.getItem("chat_theme_selection");
-    return (saved as ThemeType) || "cat";
+  // 1. Theme States (separated by section)
+  const [homeTheme, setHomeTheme] = useState<ThemeType>(() => {
+    const saved = localStorage.getItem("chat_home_theme");
+    return (saved === "dark" || saved === "light") ? (saved as ThemeType) : "dark";
   });
 
+  const [privateTheme, setPrivateTheme] = useState<ThemeType>(() => {
+    const saved = localStorage.getItem("chat_private_theme");
+    return (saved === "dark" || saved === "light" || saved === "pink" || saved === "cat") ? (saved as ThemeType) : "cat";
+  });
+
+  const [randomTheme, setRandomTheme] = useState<ThemeType>(() => {
+    const saved = localStorage.getItem("chat_random_theme");
+    return (saved === "dark" || saved === "light") ? (saved as ThemeType) : "dark";
+  });
+
+  // 2. Active Session States (sessionStorage only)
+  const [view, setView] = useState<"home" | "chat" | "random-chat">("home");
+
+  // Derive currentTheme based on active view
+  const currentTheme = view === "home" ? homeTheme : (view === "chat" ? privateTheme : randomTheme);
+
   const handleThemeChange = (newTheme: ThemeType) => {
-    setCurrentTheme(newTheme);
-    localStorage.setItem("chat_theme_selection", newTheme);
+    if (view === "home") {
+      if (newTheme === "dark" || newTheme === "light") {
+        setHomeTheme(newTheme);
+        localStorage.setItem("chat_home_theme", newTheme);
+      }
+    } else if (view === "chat") {
+      setPrivateTheme(newTheme);
+      localStorage.setItem("chat_private_theme", newTheme);
+    } else if (view === "random-chat") {
+      if (newTheme === "dark" || newTheme === "light") {
+        setRandomTheme(newTheme);
+        localStorage.setItem("chat_random_theme", newTheme);
+      }
+    }
   };
 
   const themeConfig = themes[currentTheme];
 
-  // 2. Active Session States (sessionStorage only)
-  const [view, setView] = useState<"home" | "chat">("home");
   const [roomCode, setRoomCode] = useState("");
   const [nickname, setNickname] = useState("");
   const [sessionToken, setSessionToken] = useState("");
@@ -94,22 +131,46 @@ export default function App() {
   const tabTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const unsubscribesRef = useRef<(() => void)[]>([]);
 
-  // 3. Auto-Restore session on initial mount / page refresh
+  // 3. Ensure Anonymous Firebase Auth Session on Mount
+  useEffect(() => {
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        signInAnonymously(auth).catch((err) => {
+          console.warn("Anonymous authentication failed (it might be disabled in the Firebase Console). Falling back to session-based UID.", err);
+          if (!sessionStorage.getItem("chat_uid")) {
+            const fallbackUid = "anon-" + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+            sessionStorage.setItem("chat_uid", fallbackUid);
+          }
+        });
+      } else {
+        sessionStorage.setItem("chat_uid", user.uid);
+      }
+    });
+    return () => unsubAuth();
+  }, []);
+
+  // 4. Auto-Restore session on initial mount / page refresh
   useEffect(() => {
     const restoreSession = async () => {
       const savedToken = sessionStorage.getItem("chat_session_token");
-      const savedRoom = sessionStorage.getItem("chat_room_code");
+      let savedRoom = sessionStorage.getItem("chat_room_code");
       const savedNick = sessionStorage.getItem("chat_nickname");
       const savedUid = sessionStorage.getItem("chat_uid");
 
-      if (savedToken && savedRoom === "1317" && savedNick && savedUid) {
+      if (savedRoom === "1317") {
+        savedRoom = "RUBY-CARR";
+        sessionStorage.setItem("chat_room_code", "RUBY-CARR");
+      }
+
+      if (savedToken && savedRoom && savedNick && savedUid) {
         try {
-          const chatRef = doc(db, "chat", "1317");
+          const collectionName = savedRoom === "RUBY-CARR" ? "chat" : "privateRooms";
+          const chatRef = doc(db, collectionName, savedRoom);
           let snap;
           try {
             snap = await getDoc(chatRef);
           } catch (err) {
-            handleFirestoreError(err, OperationType.GET, "chat/1317");
+            handleFirestoreError(err, OperationType.GET, `${collectionName}/${savedRoom}`);
             throw err;
           }
           if (snap.exists()) {
@@ -117,7 +178,7 @@ export default function App() {
             const members = data.members || {};
             if (members[savedUid] === savedNick) {
               setSessionToken(savedToken);
-              setRoomCode("1317");
+              setRoomCode(savedRoom);
               setNickname(savedNick);
               setView("chat");
               return;
@@ -133,25 +194,21 @@ export default function App() {
     restoreSession();
   }, []);
 
-  // 4. SECURITY FEATURE 1: Tab Hidden Countdown (30 seconds)
+  // 5. SECURITY FEATURE 1: Tab Hidden Countdown (30 minutes)
   useEffect(() => {
     const handleVisibilityChange = () => {
-      const currentNick = nickname || sessionStorage.getItem("chat_nickname") || localStorage.getItem("chat_nickname");
-      if (currentNick === "user1") return;
-
       if (document.visibilityState === "hidden") {
         if (view === "chat" && sessionToken) {
-          // Trigger logout if away for 30 seconds
+          // Trigger logout if away for 30 minutes
           tabTimeoutRef.current = setTimeout(() => {
             triggerLogout(true);
-          }, 30000);
+          }, 30 * 60 * 1000); // 30 minutes
         }
       } else {
         // Tab is active again, clear timeout
         if (tabTimeoutRef.current) {
           clearTimeout(tabTimeoutRef.current);
           tabTimeoutRef.current = null;
-          setGracePeriodBanner("Session preserved. You returned before the 30-second privacy timeout.");
         }
       }
     };
@@ -161,12 +218,11 @@ export default function App() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (tabTimeoutRef.current) clearTimeout(tabTimeoutRef.current);
     };
-  }, [view, sessionToken, nickname]);
+  }, [view, sessionToken]);
 
-  // 5. SECURITY FEATURE 2: Inactivity Timeout (30 minutes)
+  // 6. SECURITY FEATURE 2: Inactivity Timeout (30 minutes)
   useEffect(() => {
-    const currentNick = nickname || sessionStorage.getItem("chat_nickname") || localStorage.getItem("chat_nickname");
-    if (view !== "chat" || !sessionToken || currentNick === "user1") return;
+    if (view !== "chat" || !sessionToken) return;
 
     let inactivityTimer: NodeJS.Timeout;
 
@@ -190,15 +246,18 @@ export default function App() {
         window.removeEventListener(event, resetInactivityTimer);
       });
     };
-  }, [view, sessionToken, nickname]);
+  }, [view, sessionToken]);
 
-  // 6. Cleanup presence on unexpected exits (beforeunload, pagehide, visibilitychange)
+  // 7. Cleanup presence on unexpected exits (beforeunload, pagehide, visibilitychange)
   useEffect(() => {
     const handleExit = () => {
       const uid = sessionStorage.getItem("chat_uid");
       const activeNick = sessionStorage.getItem("chat_nickname") || nickname;
-      if (uid && view === "chat") {
-        const chatRef = doc(db, "chat", "1317");
+      const activeRoom = sessionStorage.getItem("chat_room_code") || roomCode;
+
+      if (uid && view === "chat" && activeRoom) {
+        const collectionName = activeRoom === "RUBY-CARR" ? "chat" : "privateRooms";
+        const chatRef = doc(db, collectionName, activeRoom);
         const updates: Record<string, any> = {
           [`members.${uid}`]: deleteField()
         };
@@ -217,26 +276,27 @@ export default function App() {
       window.removeEventListener("beforeunload", handleExit);
       window.removeEventListener("pagehide", handleExit);
     };
-  }, [view, nickname]);
+  }, [view, nickname, roomCode]);
 
-  // 7. Presence: update lastSeen field ONLY on login, logout, disconnect, and reconnect
+  // 8. Presence: update lastSeen field ONLY on login, logout, disconnect, and reconnect
   useEffect(() => {
-    if (view !== "chat" || !nickname) return;
+    if (view !== "chat" || !nickname || !roomCode) return;
 
     const uid = sessionStorage.getItem("chat_uid");
     if (!uid) return;
 
     const updatePresence = async (status: "online" | "offline") => {
       try {
-        const chatRef = doc(db, "chat", "1317");
+        const collectionName = roomCode === "RUBY-CARR" ? "chat" : "privateRooms";
+        const chatRef = doc(db, collectionName, roomCode);
         if (status === "online") {
-          console.log(`[Firestore Write] Presence - updateDoc (online) on chat/1317 for ${nickname}`);
+          console.log(`[Firestore Write] Presence - updateDoc (online) on ${collectionName}/${roomCode} for ${nickname}`);
           await updateDoc(chatRef, {
             [`lastSeen.${nickname}`]: Date.now(),
             [`members.${uid}`]: nickname
           });
         } else {
-          console.log(`[Firestore Write] Presence - updateDoc (offline) on chat/1317 for ${nickname}`);
+          console.log(`[Firestore Write] Presence - updateDoc (offline) on ${collectionName}/${roomCode} for ${nickname}`);
           await updateDoc(chatRef, {
             [`lastSeen.${nickname}`]: deleteField(),
             [`members.${uid}`]: deleteField()
@@ -260,7 +320,7 @@ export default function App() {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [view, nickname]);
+  }, [view, nickname, roomCode]);
 
   // Logout Trigger helper with active presence pruning
   const triggerLogout = async (byTabHidden = false, byInactivity = false) => {
@@ -276,11 +336,13 @@ export default function App() {
 
     const activeNick = sessionStorage.getItem("chat_nickname") || nickname;
     const uid = sessionStorage.getItem("chat_uid");
+    const activeRoom = sessionStorage.getItem("chat_room_code") || roomCode;
 
-    // 2. Remove the current user from the activeUsers collection (or wherever active users are stored).
-    if (uid) {
+    // 2. Remove the current user from active room
+    if (uid && activeRoom) {
       try {
-        const chatRef = doc(db, "chat", "1317");
+        const collectionName = activeRoom === "RUBY-CARR" ? "chat" : "privateRooms";
+        const chatRef = doc(db, collectionName, activeRoom);
         const updates: Record<string, any> = {
           [`members.${uid}`]: deleteField()
         };
@@ -291,7 +353,7 @@ export default function App() {
         // 3. Wait until the Firestore delete/update operation completes successfully using await.
         await updateDoc(chatRef, updates);
 
-        const messagesRef = collection(db, "chat", "1317", "messages");
+        const messagesRef = collection(db, collectionName, activeRoom, "messages");
         try {
           await addDoc(messagesRef, {
             sender: "SYSTEM",
@@ -299,7 +361,7 @@ export default function App() {
             timestamp: serverTimestamp()
           });
         } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, "chat/1317/messages");
+          handleFirestoreError(err, OperationType.CREATE, `${collectionName}/${activeRoom}/messages`);
         }
       } catch (err) {
         console.error("Logout cleanup failed:", err);
@@ -314,125 +376,320 @@ export default function App() {
     // 5. Clear sessionStorage.
     sessionStorage.clear();
 
-    // 6. Clear any in-memory authentication state (none in our custom unauthenticated setup).
-
-    // 7. Redirect to the login page.
+    // 6. Redirect to the login page.
     setView("home");
 
     if (byTabHidden) {
-      setSecurityNotice("You have been automatically logged out to preserve your privacy after leaving the browser tab for over 30 seconds.");
+      setSecurityNotice("You have been automatically logged out to preserve your privacy after leaving the browser tab for over 30 minutes.");
     } else if (byInactivity) {
       setSecurityNotice("You have been logged out automatically due to 30 minutes of inactivity.");
     }
   };
 
-  const handleJoinRoom = async (code: string, username: string, password: string): Promise<string | void> => {
+  const handleJoinRoom = async (
+    code: string,
+    username?: string,
+    password?: string,
+    mode?: "login" | "register",
+    confirmPassword?: string
+  ): Promise<string | void> => {
     try {
-      // 1. Verify room credentials using the fixed allowed accounts
-      if (code !== "1317" || !((username === "user1" && password === "user1") || (username === "user2" && password === "user2"))) {
-        return "Invalid credentials.";
-      }
+      const cleanCode = code.trim().toUpperCase();
 
-      // 2. Fetch the room document
-      const chatRef = doc(db, "chat", "1317");
-      let snap;
-      try {
-        snap = await getDoc(chatRef);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.GET, "chat/1317");
-        throw err;
-      }
+      if (cleanCode === "RUBY-CARR") {
+        if (!username || !password) {
+          return "Invalid credentials.";
+        }
+        // 1. Verify permanent room credentials using fixed accounts
+        if (!((username === "user1" && password === "user1") || (username === "user2" && password === "user2"))) {
+          return "Invalid credentials.";
+        }
 
-      let members: Record<string, string> = {};
-      let lastSeenMap: Record<string, number> = {};
-
-      if (snap.exists()) {
-        const data = snap.data();
-        members = data.members || {};
-        lastSeenMap = data.lastSeen || {};
-      } else {
+        // 2. Fetch or create RUBY-CARR in the "chat" collection
+        const chatRef = doc(db, "chat", "RUBY-CARR");
+        let snap;
         try {
-          await setDoc(chatRef, { members: {}, lastSeen: {} });
+          snap = await getDoc(chatRef);
         } catch (err) {
-          handleFirestoreError(err, OperationType.CREATE, "chat/1317");
+          handleFirestoreError(err, OperationType.GET, "chat/RUBY-CARR");
           throw err;
         }
-      }
 
-      const uid = sessionStorage.getItem("chat_uid") || "uid-" + Math.random().toString(36).substring(2, 15);
-      sessionStorage.setItem("chat_uid", uid);
+        let members: Record<string, string> = {};
+        let lastSeenMap: Record<string, number> = {};
 
-      // 3. Verify if the selected username is already connected under a different session/UID
-      const existingSession = Object.entries(members).find(
-        ([mUid, mName]) => mName === username && mUid !== uid
-      );
-
-      if (existingSession) {
-        const [existingUid] = existingSession;
-        const lastSeenTime = lastSeenMap[username];
-        const isStale = lastSeenTime ? (Date.now() - lastSeenTime > 60000) : true;
-
-        if (isStale) {
-          // Stale session detected! Automatically consider dead, remove from Firestore, and allow the login
-          try {
-            await updateDoc(chatRef, {
-              [`members.${existingUid}`]: deleteField(),
-              [`lastSeen.${username}`]: deleteField()
-            });
-            // Update local structures to allow immediate flow
-            delete members[existingUid];
-            delete lastSeenMap[username];
-          } catch (err) {
-            console.error("Cleanup of stale session failed:", err);
-          }
+        if (snap.exists()) {
+          const data = snap.data();
+          members = data.members || {};
+          lastSeenMap = data.lastSeen || {};
         } else {
-          return "This account is already active.";
+          // Initialize first-time entry
+          try {
+            await setDoc(chatRef, { code: "RUBY-CARR", members: {}, lastSeen: {}, migrated: true });
+            
+            // Migrate history from 1317 (if any old logs exist)
+            const oldRef = collection(db, "chat", "1317", "messages");
+            const newRef = collection(db, "chat", "RUBY-CARR", "messages");
+            try {
+              const oldSnap = await getDocs(oldRef);
+              for (const docSnap of oldSnap.docs) {
+                const msgData = docSnap.data();
+                await setDoc(doc(newRef, docSnap.id), {
+                  sender: msgData.sender,
+                  text: msgData.text,
+                  timestamp: msgData.timestamp || serverTimestamp(),
+                  replyTo: msgData.replyTo || null,
+                  reactions: msgData.reactions || {}
+                });
+              }
+            } catch (migErr) {
+              console.error("Migration of messages failed:", migErr);
+            }
+          } catch (err) {
+            handleFirestoreError(err, OperationType.CREATE, "chat/RUBY-CARR");
+            throw err;
+          }
+        }
+
+        const uid = auth.currentUser?.uid || sessionStorage.getItem("chat_uid") || "uid-" + Math.random().toString(36).substring(2, 15);
+        sessionStorage.setItem("chat_uid", uid);
+
+        // 3. Verify if the selected username is already connected under a different session/UID
+        const existingSession = Object.entries(members).find(
+          ([mUid, mName]) => mName === username && mUid !== uid
+        );
+
+        if (existingSession) {
+          const [existingUid] = existingSession;
+          const lastSeenTime = lastSeenMap[username];
+          const isStale = lastSeenTime ? (Date.now() - lastSeenTime > 60000) : true;
+
+          if (isStale) {
+            // Stale session detected! Evict the existing session
+            try {
+              await updateDoc(chatRef, {
+                [`members.${existingUid}`]: deleteField(),
+                [`lastSeen.${username}`]: deleteField()
+              });
+              delete members[existingUid];
+              delete lastSeenMap[username];
+            } catch (err) {
+              console.error("Cleanup of stale session failed:", err);
+            }
+          } else {
+            return "This account is already active.";
+          }
+        }
+
+        // 4. Update members list
+        try {
+          await updateDoc(chatRef, {
+            [`members.${uid}`]: username,
+            [`lastSeen.${username}`]: Date.now()
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.UPDATE, "chat/RUBY-CARR");
+          throw err;
+        }
+
+        // 5. Post SYSTEM join notification
+        const messagesRef = collection(db, "chat", "RUBY-CARR", "messages");
+        try {
+          await addDoc(messagesRef, {
+            sender: "SYSTEM",
+            text: `${username} has joined the room.`,
+            timestamp: serverTimestamp()
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, "chat/RUBY-CARR/messages");
+          throw err;
+        }
+
+        const generatedToken = username + "-RUBY-CARR-" + Math.random().toString(36).substring(2, 7);
+
+        sessionStorage.setItem("chat_session_token", generatedToken);
+        sessionStorage.setItem("chat_room_code", "RUBY-CARR");
+        sessionStorage.setItem("chat_nickname", username);
+
+        setSessionToken(generatedToken);
+        setRoomCode("RUBY-CARR");
+        setNickname(username);
+        setView("chat");
+        return;
+
+      } else {
+        // Custom invite-only secure private room (supporting 6-digit legacy or 9-character K7M2-XP9Q codes)
+        if (cleanCode.length !== 6 && cleanCode.length !== 9) {
+          return "Please enter a valid room code or RUBY-CARR.";
+        }
+
+        const roomRef = doc(db, "privateRooms", cleanCode);
+        const snap = await getDoc(roomRef);
+
+        if (!snap.exists()) {
+          return "Room not found.";
+        }
+
+        const data = snap.data();
+        const now = Date.now();
+
+        if (now > data.expiresAt) {
+          // Room expired - trigger automatic database wiping
+          try {
+            const messagesRef = collection(db, "privateRooms", cleanCode, "messages");
+            const msgSnap = await getDocs(messagesRef);
+            for (const d of msgSnap.docs) {
+              await deleteDoc(d.ref).catch(() => {});
+            }
+            await deleteDoc(roomRef).catch(() => {});
+          } catch (e) {
+            console.error("Automatic clean cleanup of expired room failed:", e);
+          }
+          return "Room expired.";
+        }
+
+        const members = data.members || {};
+        const accounts = data.accounts || {};
+        const lastSeenMap = data.lastSeen || {};
+        const accountsCount = Object.keys(accounts).length;
+
+        const myUid = auth.currentUser?.uid || sessionStorage.getItem("chat_uid") || "uid-" + Math.random().toString(36).substring(2, 15);
+        sessionStorage.setItem("chat_uid", myUid);
+
+        if (mode === "register") {
+          if (!username || !password || !confirmPassword) {
+            return "Please fill out all fields.";
+          }
+          if (password !== confirmPassword) {
+            return "Passwords do not match.";
+          }
+          const cleanUsername = username.trim();
+          if (!cleanUsername) {
+            return "Username cannot be empty.";
+          }
+
+          if (accountsCount >= 2) {
+            return "Room is full. Registration is disabled.";
+          }
+
+          if (accounts[cleanUsername]) {
+            return "Username already exists.";
+          }
+
+          // Secure password hash
+          const hashedPassword = await hashPassword(password);
+
+          const updatedAccounts = {
+            ...accounts,
+            [cleanUsername]: { hashedPassword }
+          };
+
+          await updateDoc(roomRef, {
+            accounts: updatedAccounts,
+            [`members.${myUid}`]: cleanUsername,
+            [`lastSeen.${cleanUsername}`]: Date.now()
+          });
+
+          // Post SYSTEM join notification
+          const messagesRef = collection(db, "privateRooms", cleanCode, "messages");
+          await addDoc(messagesRef, {
+            sender: "SYSTEM",
+            text: `${cleanUsername} has joined the room.`,
+            timestamp: serverTimestamp()
+          });
+
+          const generatedToken = cleanUsername + "-" + cleanCode + "-" + Math.random().toString(36).substring(2, 7);
+          sessionStorage.setItem("chat_session_token", generatedToken);
+          sessionStorage.setItem("chat_room_code", cleanCode);
+          sessionStorage.setItem("chat_nickname", cleanUsername);
+
+          setSessionToken(generatedToken);
+          setRoomCode(cleanCode);
+          setNickname(cleanUsername);
+          setView("chat");
+          return;
+
+        } else if (mode === "login") {
+          if (!username || !password) {
+            return "Please enter username and password.";
+          }
+          const cleanUsername = username.trim();
+          if (!accounts[cleanUsername]) {
+            return "Invalid username or password.";
+          }
+
+          const hashedInput = await hashPassword(password);
+          if (accounts[cleanUsername].hashedPassword !== hashedInput) {
+            return "Invalid username or password.";
+          }
+
+          // Verify if the selected username is already connected under a different session/UID
+          const existingSession = Object.entries(members).find(
+            ([mUid, mName]) => mName === cleanUsername && mUid !== myUid
+          );
+
+          if (existingSession) {
+            const [existingUid] = existingSession;
+            const lastSeenTime = lastSeenMap[cleanUsername];
+            const isStale = lastSeenTime ? (Date.now() - lastSeenTime > 60000) : true;
+
+            if (isStale) {
+              await updateDoc(roomRef, {
+                [`members.${existingUid}`]: deleteField(),
+                [`lastSeen.${cleanUsername}`]: deleteField()
+              });
+              delete members[existingUid];
+              delete lastSeenMap[cleanUsername];
+            } else {
+              return "This account is already active.";
+            }
+          }
+
+          // Update members list & presence
+          await updateDoc(roomRef, {
+            [`members.${myUid}`]: cleanUsername,
+            [`lastSeen.${cleanUsername}`]: Date.now()
+          });
+
+          // Post SYSTEM join notification
+          const messagesRef = collection(db, "privateRooms", cleanCode, "messages");
+          await addDoc(messagesRef, {
+            sender: "SYSTEM",
+            text: `${cleanUsername} has joined the room.`,
+            timestamp: serverTimestamp()
+          });
+
+          const generatedToken = cleanUsername + "-" + cleanCode + "-" + Math.random().toString(36).substring(2, 7);
+          sessionStorage.setItem("chat_session_token", generatedToken);
+          sessionStorage.setItem("chat_room_code", cleanCode);
+          sessionStorage.setItem("chat_nickname", cleanUsername);
+
+          setSessionToken(generatedToken);
+          setRoomCode(cleanCode);
+          setNickname(cleanUsername);
+          setView("chat");
+          return;
+        } else {
+          return "Verification failed. Please try again.";
         }
       }
-
-      // 4. Update members list
-      try {
-        await updateDoc(chatRef, {
-          [`members.${uid}`]: username,
-          [`lastSeen.${username}`]: Date.now()
-        });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, "chat/1317");
-        throw err;
-      }
-
-      // 5. Post SYSTEM join notification
-      const messagesRef = collection(db, "chat", "1317", "messages");
-      try {
-        await addDoc(messagesRef, {
-          sender: "SYSTEM",
-          text: `${username} has joined the room.`,
-          timestamp: serverTimestamp()
-        });
-      } catch (err) {
-        handleFirestoreError(err, OperationType.CREATE, "chat/1317/messages");
-        throw err;
-      }
-
-      const generatedToken = username + "-1317-" + Math.random().toString(36).substring(2, 7);
-
-      sessionStorage.setItem("chat_session_token", generatedToken);
-      sessionStorage.setItem("chat_room_code", "1317");
-      sessionStorage.setItem("chat_nickname", username);
-
-      setSessionToken(generatedToken);
-      setRoomCode("1317");
-      setNickname(username);
-      setView("chat");
     } catch (err) {
       console.error("Join failed:", err);
       return "Network error joining chat room.";
     }
   };
 
+  const handleStartRandomChat = () => {
+    setView("random-chat");
+  };
+
+  const handleLeaveRandomChat = () => {
+    setView("home");
+  };
+
   const handleLeaveCallback = useCallback(() => {
     triggerLogout(false);
-  }, [nickname]);
+  }, [nickname, roomCode]);
 
   const registerUnsubscribeCallback = useCallback((unsub: () => void) => {
     unsubscribesRef.current.push(unsub);
@@ -445,25 +702,25 @@ export default function App() {
     >
       {currentTheme === "cat" && view === "home" && <CatBackground theme={themeConfig} />}
       <div 
-        className={`w-full max-w-[420px] flex flex-col mobile-no-scrollbar ${view === "chat" ? "overflow-hidden" : "h-screen max-md:h-dvh px-4 justify-between py-6 overflow-y-auto"}`}
-        style={{ height: view === "chat" ? viewportHeight : undefined }}
+        className={`w-full max-w-[420px] flex flex-col mobile-no-scrollbar ${view !== "home" ? "overflow-hidden" : "h-screen max-md:h-dvh px-4 justify-between py-6 overflow-y-auto"}`}
+        style={{ height: view !== "home" ? viewportHeight : undefined }}
       >
         
         {/* TOP THEME TOGGLE / SECURITY BADGE IN HOMEPAGE */}
-        {view !== "chat" && (
-          <header className="flex items-center justify-between h-12 mb-4">
+        {view === "home" && (
+          <header className="flex items-center justify-between h-12 mb-4 shrink-0">
             <div className="flex items-center gap-1.5 opacity-60">
               <Shield className="w-4 h-4" style={{ color: themeConfig.accent }} />
               <span className="text-[10px] font-bold tracking-widest uppercase">
                 Privacy Active
               </span>
             </div>
-            <ThemeSelector currentTheme={currentTheme} onThemeChange={handleThemeChange} />
+            <ThemeSelector currentTheme={currentTheme} onThemeChange={handleThemeChange} allowedThemes={["dark", "light"]} />
           </header>
         )}
 
         {/* WORKSPACE AREA with slide transitions */}
-        <div className={`flex flex-col ${view === "chat" ? "h-full w-full overflow-hidden" : "flex-1 justify-center"}`}>
+        <div className={`flex flex-col ${view !== "home" ? "h-full w-full overflow-hidden" : "flex-1 justify-center shrink-0"}`}>
           <AnimatePresence mode="wait">
             {view === "home" && (
               <motion.div
@@ -476,6 +733,7 @@ export default function App() {
                 <HomeView
                   theme={themeConfig}
                   onJoin={handleJoinRoom}
+                  onStartRandomChat={handleStartRandomChat}
                 />
               </motion.div>
             )}
@@ -501,12 +759,28 @@ export default function App() {
                 />
               </motion.div>
             )}
+
+            {view === "random-chat" && (
+              <motion.div
+                key="random-chat"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="w-full h-full"
+              >
+                <RandomChatView
+                  theme={themeConfig}
+                  onLeave={handleLeaveRandomChat}
+                />
+              </motion.div>
+            )}
           </AnimatePresence>
         </div>
 
         {/* MINIMAL FOOTER FOR HOMEPAGE */}
-        {view !== "chat" && (
-          <footer className="text-center mt-8 py-2">
+        {view === "home" && (
+          <footer className="text-center mt-8 py-2 shrink-0">
             <span className="text-[10px] opacity-25 font-mono tracking-widest pl-1">
               EPHEMERAL SECURE ENDPOINT
             </span>

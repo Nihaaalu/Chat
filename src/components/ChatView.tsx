@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { ThemeConfig } from "../theme.js";
 import { ThemeType, MessageType } from "../types.js";
 import { ArrowLeft, RefreshCw, Send, Users, ShieldAlert, X, CornerUpLeft, Settings, Volume2, VolumeX, Search, ChevronUp, ChevronDown, Pin, PinOff, Edit3 } from "lucide-react";
+import { runVerification } from "../lib/recaptcha.js";
 
 // Synthesizes a high-fidelity, subtle dual-tone chime using Web Audio API (perfectly self-contained)
 const playNotificationSound = () => {
@@ -107,7 +108,7 @@ const SleepingCatIllustration = () => (
   </div>
 );
 
-import { collection, doc, query, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs, updateDoc } from "firebase/firestore";
+import { collection, doc, query, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs, updateDoc, getDoc, setDoc } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../lib/firebase.js";
 import ThemeSelector from "./ThemeSelector.js";
 import MessageCard from "./MessageCard.js";
@@ -133,6 +134,7 @@ export default function ChatView({
   onLeave,
   registerUnsubscribe
 }: ChatViewProps) {
+  const collectionName = roomCode === "RUBY-CARR" ? "chat" : "privateRooms";
   const [messages, setMessages] = useState<MessageType[]>([]);
 
   // STEP 1 & STEP 2: Process, sanitize, and log Firestore documents
@@ -287,6 +289,110 @@ export default function ChatView({
     }
   };
 
+  const [migrationLoading, setMigrationLoading] = useState(false);
+
+  const handleExportData = async () => {
+    setMigrationLoading(true);
+    try {
+      const roomRef = doc(db, collectionName, roomCode);
+      let roomSnap;
+      try {
+        roomSnap = await getDoc(roomRef);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, `${collectionName}/${roomCode}`);
+        throw err;
+      }
+      const roomData = roomSnap.exists() ? roomSnap.data() : null;
+
+      const messagesRef = collection(db, collectionName, roomCode, "messages");
+      let messagesSnap;
+      try {
+        messagesSnap = await getDocs(messagesRef);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.LIST, `${collectionName}/${roomCode}/messages`);
+        throw err;
+      }
+      const msgs = messagesSnap.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      }));
+
+      const exportObject = {
+        roomCode,
+        roomData,
+        messages: msgs,
+        exportedAt: new Date().toISOString(),
+        version: "1.0.0"
+      };
+
+      const dataStr = JSON.stringify(exportObject, null, 2);
+      const blob = new Blob([dataStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `ruby_chat_${roomCode}_migration.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast("Data exported successfully!");
+    } catch (err) {
+      console.error(err);
+      showToast("Export failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setMigrationLoading(false);
+    }
+  };
+
+  const handleImportData = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setMigrationLoading(true);
+    try {
+      const text = await file.text();
+      const importData = JSON.parse(text);
+
+      if (!importData || !importData.roomCode || !Array.isArray(importData.messages)) {
+        throw new Error("Invalid migration file format");
+      }
+
+      const roomRef = doc(db, collectionName, roomCode);
+      if (importData.roomData) {
+        try {
+          await setDoc(roomRef, importData.roomData, { merge: true });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, `${collectionName}/${roomCode}`);
+          throw err;
+        }
+      }
+
+      const messagesRef = collection(db, collectionName, roomCode, "messages");
+      let successCount = 0;
+      for (const msg of importData.messages) {
+        if (!msg.id) continue;
+        const msgDocRef = doc(messagesRef, msg.id);
+        const { id, ...msgFields } = msg;
+        try {
+          await setDoc(msgDocRef, msgFields, { merge: true });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, `${collectionName}/${roomCode}/messages/${id}`);
+          throw err;
+        }
+        successCount++;
+      }
+
+      showToast(`Imported ${successCount} messages successfully!`);
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (err) {
+      console.error(err);
+      showToast("Import failed: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setMigrationLoading(false);
+      event.target.value = "";
+    }
+  };
+
   // 3. Typing indicator state & functions
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -296,8 +402,8 @@ export default function ChatView({
     if (lastTypingStateRef.current === isTyping) return;
     lastTypingStateRef.current = isTyping;
     try {
-      const roomRef = doc(db, "chat", roomCode);
-      console.log(`[Firestore Write] updateTypingState - updateDoc (typing state) on chat/${roomCode} for ${nickname} isTyping=${isTyping}`);
+      const roomRef = doc(db, collectionName, roomCode);
+      console.log(`[Firestore Write] updateTypingState - updateDoc (typing state) on ${collectionName}/${roomCode} for ${nickname} isTyping=${isTyping}`);
       await updateDoc(roomRef, {
         [`typing.${nickname}`]: isTyping
       });
@@ -329,8 +435,8 @@ export default function ChatView({
 
   const handlePinMessage = async (msg: MessageType) => {
     try {
-      const roomRef = doc(db, "chat", roomCode);
-      console.log(`[Firestore Write] handlePinMessage - updateDoc (pin message) on chat/${roomCode} pinnedMessageId=${msg.id}`);
+      const roomRef = doc(db, collectionName, roomCode);
+      console.log(`[Firestore Write] handlePinMessage - updateDoc (pin message) on ${collectionName}/${roomCode} pinnedMessageId=${msg.id}`);
       await updateDoc(roomRef, {
         pinnedMessageId: msg.id
       });
@@ -342,8 +448,8 @@ export default function ChatView({
 
   const handleUnpinMessage = async () => {
     try {
-      const roomRef = doc(db, "chat", roomCode);
-      console.log(`[Firestore Write] handleUnpinMessage - updateDoc (unpin message) on chat/${roomCode} pinnedMessageId=null`);
+      const roomRef = doc(db, collectionName, roomCode);
+      console.log(`[Firestore Write] handleUnpinMessage - updateDoc (unpin message) on ${collectionName}/${roomCode} pinnedMessageId=null`);
       await updateDoc(roomRef, {
         pinnedMessageId: null
       });
@@ -366,8 +472,8 @@ export default function ChatView({
   const handleDeleteMessage = async (msgId: string, forEveryone: boolean) => {
     if (forEveryone) {
       try {
-        const docRef = doc(db, "chat", roomCode, "messages", msgId);
-        console.log(`[Firestore Write] handleDeleteMessage - updateDoc (delete for everyone) on chat/${roomCode}/messages/${msgId}`);
+        const docRef = doc(db, collectionName, roomCode, "messages", msgId);
+        console.log(`[Firestore Write] handleDeleteMessage - updateDoc (delete for everyone) on ${collectionName}/${roomCode}/messages/${msgId}`);
         await updateDoc(docRef, {
           text: "This message was deleted.",
           isDeleted: true
@@ -389,8 +495,8 @@ export default function ChatView({
 
   const handleEditMessage = async (msgId: string, newText: string) => {
     try {
-      const docRef = doc(db, "chat", roomCode, "messages", msgId);
-      console.log(`[Firestore Write] handleEditMessage - updateDoc (edit message) on chat/${roomCode}/messages/${msgId}`);
+      const docRef = doc(db, collectionName, roomCode, "messages", msgId);
+      console.log(`[Firestore Write] handleEditMessage - updateDoc (edit message) on ${collectionName}/${roomCode}/messages/${msgId}`);
       await updateDoc(docRef, {
         text: newText,
         isEdited: true
@@ -420,7 +526,14 @@ export default function ChatView({
   // Emojis Reactions trigger handler
   const handleReaction = async (msgId: string, emoji: string) => {
     try {
-      const docRef = doc(db, "chat", roomCode, "messages", msgId);
+      await runVerification("REACTION");
+    } catch (err: any) {
+      showToast(err.message || "Reaction blocked due to security.");
+      return;
+    }
+
+    try {
+      const docRef = doc(db, collectionName, roomCode, "messages", msgId);
       const targetMsg = messages.find((m) => m.id === msgId);
       if (!targetMsg) return;
 
@@ -439,7 +552,7 @@ export default function ChatView({
         [emoji]: updatedUsers
       };
 
-      console.log(`[Firestore Write] handleReaction - updateDoc (reaction update) on chat/${roomCode}/messages/${msgId} reactions:`, nextReactions);
+      console.log(`[Firestore Write] handleReaction - updateDoc (reaction update) on ${collectionName}/${roomCode}/messages/${msgId} reactions:`, nextReactions);
       await updateDoc(docRef, { reactions: nextReactions });
     } catch (err) {
       console.error("Failed to react to message:", err);
@@ -512,6 +625,15 @@ export default function ChatView({
     const prevIdx = (currentSearchIndex - 1 + matchedMessageIds.length) % matchedMessageIds.length;
     setCurrentSearchIndex(prevIdx);
     scrollToMatch(matchedMessageIds[prevIdx]);
+  };
+
+  const handleOpenSearch = async () => {
+    try {
+      await runVerification("SEARCH");
+      setShowSearchBar(true);
+    } catch (err: any) {
+      showToast(err.message || "Search check failed.");
+    }
   };
 
   // Micro-animations scheduling: randomly every 45-75 seconds
@@ -594,7 +716,7 @@ export default function ChatView({
     if (!roomCode) return;
 
     // 1. Listen to active room document for participant updates, pinning and typing indicators
-    const roomRef = doc(db, "chat", roomCode);
+    const roomRef = doc(db, collectionName, roomCode);
     const unsubscribeRoom = onSnapshot(roomRef, (snapshot) => {
       if (!snapshot.exists()) {
         return;
@@ -624,11 +746,11 @@ export default function ChatView({
 
     }, (err) => {
       console.error("Room document snapshot error:", err);
-      handleFirestoreError(err, OperationType.GET, `chat/${roomCode}`);
+      handleFirestoreError(err, OperationType.GET, `${collectionName}/${roomCode}`);
     });
 
     // 2. Listen to real-time messages subcollection
-    const messagesRef = collection(db, "chat", roomCode, "messages");
+    const messagesRef = collection(db, collectionName, roomCode, "messages");
     const q = query(messagesRef, orderBy("timestamp", "asc"));
     
     let isInitial = true;
@@ -704,7 +826,7 @@ export default function ChatView({
       scrollToBottom();
     }, (err) => {
       console.error("Messages subcollection snapshot error:", err);
-      handleFirestoreError(err, OperationType.GET, `chat/${roomCode}/messages`);
+      handleFirestoreError(err, OperationType.GET, `${collectionName}/${roomCode}/messages`);
     });
 
     registerUnsubscribe(unsubscribeRoom);
@@ -753,13 +875,13 @@ export default function ChatView({
     if (refreshing) return;
     setRefreshing(true);
     try {
-      const messagesRef = collection(db, "chat", roomCode, "messages");
+      const messagesRef = collection(db, collectionName, roomCode, "messages");
       const q = query(messagesRef, orderBy("timestamp", "asc"));
       let snapshot;
       try {
         snapshot = await getDocs(q);
       } catch (err) {
-        handleFirestoreError(err, OperationType.GET, `chat/${roomCode}/messages`);
+        handleFirestoreError(err, OperationType.GET, `${collectionName}/${roomCode}/messages`);
         throw err;
       }
       const msgs: MessageType[] = [];
@@ -795,6 +917,13 @@ export default function ChatView({
     if (e) e.preventDefault();
     if (!inputValue.trim()) return;
 
+    try {
+      await runVerification("SEND_MESSAGE");
+    } catch (err: any) {
+      showToast(err.message || "Message blocked due to security.");
+      return;
+    }
+
     const text = inputValue.trim();
     setInputValue("");
 
@@ -817,7 +946,7 @@ export default function ChatView({
     }
 
     try {
-      const messagesRef = collection(db, "chat", roomCode, "messages");
+      const messagesRef = collection(db, collectionName, roomCode, "messages");
       const messageDoc: Record<string, any> = {
         sender: nickname,
         text: text,
@@ -828,10 +957,10 @@ export default function ChatView({
         messageDoc.replyToMessageId = replyToId;
       }
       try {
-        console.log(`[Firestore Write] handleSendMessage - addDoc (new message) on chat/${roomCode}/messages`, messageDoc);
+        console.log(`[Firestore Write] handleSendMessage - addDoc (new message) on ${collectionName}/${roomCode}/messages`, messageDoc);
         await addDoc(messagesRef, messageDoc);
       } catch (err) {
-        handleFirestoreError(err, OperationType.CREATE, `chat/${roomCode}/messages`);
+        handleFirestoreError(err, OperationType.CREATE, `${collectionName}/${roomCode}/messages`);
         throw err;
       }
     } catch (err) {
@@ -1011,7 +1140,7 @@ export default function ChatView({
             <div className="flex items-center gap-1.5 max-md:gap-1">
               {/* Search button */}
               <button
-                onClick={() => setShowSearchBar(true)}
+                onClick={handleOpenSearch}
                 className="md:p-2 rounded-full border transition-all duration-300 cursor-pointer active:scale-90 max-md:w-11 max-md:h-11 flex items-center justify-center shrink-0"
                 style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
                 title="Search Messages"
@@ -1671,6 +1800,36 @@ export default function ChatView({
                     onChange={(e) => setShowTimestamps(e.target.checked)}
                     className="w-4 h-4 rounded text-amber-500 border-gray-300 focus:ring-amber-500 cursor-pointer shrink-0"
                   />
+                </div>
+
+                {/* Firebase Data Migration */}
+                <div className="flex flex-col gap-2 p-3 rounded-2xl border text-left" style={{ borderColor: theme.border, backgroundColor: theme.bg }}>
+                  <div className="text-xs font-bold" style={{ color: theme.text }}>Firebase Data Migration</div>
+                  <p className="text-[10px] opacity-60 leading-relaxed" style={{ color: theme.text }}>
+                    Export current chat data as JSON to backup or import it to migrate from the old project.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <button
+                      type="button"
+                      disabled={migrationLoading}
+                      onClick={handleExportData}
+                      className="py-1.5 px-2 text-[9px] font-black uppercase tracking-wider rounded-xl border text-center transition-all cursor-pointer bg-amber-500 hover:bg-amber-600 border-amber-600 text-white disabled:opacity-50"
+                    >
+                      {migrationLoading ? "Exporting..." : "Export Data"}
+                    </button>
+                    <label
+                      className="py-1.5 px-2 text-[9px] font-black uppercase tracking-wider rounded-xl border text-center transition-all cursor-pointer bg-green-600 hover:bg-green-700 border-green-700 text-white disabled:opacity-50 flex items-center justify-center"
+                    >
+                      {migrationLoading ? "Importing..." : "Import Data"}
+                      <input
+                        type="file"
+                        accept=".json"
+                        disabled={migrationLoading}
+                        onChange={handleImportData}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
                 </div>
 
                 {/* 7. Clear local cache */}

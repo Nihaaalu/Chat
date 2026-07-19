@@ -1,11 +1,12 @@
 {
-  "projectId": "high-xerocopy-qpp0d",
-  "appId": "1:91733512647:web:251fdaf947155e8112c9e2",
-  "apiKey": "AIzaSyAKWH5nYjl1B1votcmx8FDWkNEz40lWEZ0",
-  "authDomain": "high-xerocopy-qpp0d.firebaseapp.com",
+  "projectId": "ruby-random-chat-app",
+  "appId": "1:1003745562967:web:cad11782a52b9af2342e12",
+  "apiKey": "AIzaSyCbxfwQrGVE1C9Ln1qsHTuatSFjFkDMQsc",
+  "authDomain": "ruby-random-chat-app.firebaseapp.com",
   "firestoreDatabaseId": "ai-studio-privatechat-366b6ce5-da48-4e62-8c69-0117e3059361",
-  "storageBucket": "high-xerocopy-qpp0d.firebasestorage.app",
-  "messagingSenderId": "91733512647",
+  "storageBucket": "ruby-random-chat-app.firebasestorage.app",
+  "messagingSenderId": "1003745562967",
   "measurementId": "",
-  "oAuthClientId": "91733512647-q2bkvb900m62fsm3hqp0plj02q4qvm60.apps.googleusercontent.com"
+  "oAuthClientId": "1003745562967-nikk8mmrpitmuiouuglr5rm3m578nc0t.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
 }
