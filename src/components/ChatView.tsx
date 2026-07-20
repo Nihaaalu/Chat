@@ -702,12 +702,14 @@ export default function ChatView({
   // Auto-scroll to bottom when keyboard opens/closes via visual viewport
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
-    const handleViewportResize = () => {
+    const handleViewportChange = () => {
       scrollToBottom();
     };
-    window.visualViewport.addEventListener("resize", handleViewportResize);
+    window.visualViewport.addEventListener("resize", handleViewportChange);
+    window.visualViewport.addEventListener("scroll", handleViewportChange);
     return () => {
-      window.visualViewport?.removeEventListener("resize", handleViewportResize);
+      window.visualViewport?.removeEventListener("resize", handleViewportChange);
+      window.visualViewport?.removeEventListener("scroll", handleViewportChange);
     };
   }, []);
 
@@ -1263,7 +1265,7 @@ export default function ChatView({
       {/* MESSAGE LIST */}
       <main 
         onScroll={handleScroll}
-        className={`flex-1 px-1 pt-4 pb-28 max-md:pb-20 mobile-no-scrollbar ${currentThemeType === "cat" ? "cat-scrollbar" : ""}`}
+        className={`flex-1 px-1 pt-4 pb-4 max-md:pb-3 mobile-no-scrollbar ${currentThemeType === "cat" ? "cat-scrollbar" : ""}`}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -1475,7 +1477,7 @@ export default function ChatView({
 
       {/* BOTTOM INPUT FOOTER */}
       <footer 
-        className="absolute bottom-0 left-0 w-full px-4 pb-5 max-md:pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] pt-3 max-md:pt-2 z-20 border-t transition-colors duration-300 flex flex-col gap-2 max-md:gap-1.5"
+        className="relative w-full px-4 pb-4 max-md:pb-4 pt-3 max-md:pt-2 shrink-0 z-20 border-t transition-all duration-300 flex flex-col gap-2 max-md:gap-1.5"
         style={{ borderColor: theme.border, backgroundColor: theme.bg }}
       >
         {/* Realtime Typing Indicator snippet */}

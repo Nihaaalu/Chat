@@ -140,7 +140,7 @@ export default function App() {
   const [gracePeriodBanner, setGracePeriodBanner] = useState<string | null>(null);
 
   // Dynamic Viewport Height for mobile keyboard resilience
-  const [viewportHeight, setViewportHeight] = useState<string>("100vh");
+  const [viewportHeight, setViewportHeight] = useState<string>("100%");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -148,8 +148,11 @@ export default function App() {
     const updateHeight = () => {
       if (window.visualViewport) {
         setViewportHeight(`${window.visualViewport.height}px`);
+        if (window.scrollY !== 0 || window.scrollX !== 0) {
+          window.scrollTo(0, 0);
+        }
       } else {
-        setViewportHeight(`${window.innerHeight}px`);
+        setViewportHeight("100%");
       }
     };
     
@@ -163,6 +166,36 @@ export default function App() {
       window.visualViewport?.removeEventListener("resize", updateHeight);
       window.visualViewport?.removeEventListener("scroll", updateHeight);
       window.removeEventListener("resize", updateHeight);
+    };
+  }, []);
+
+  // Set html/body styles to height: 100% and overflow: hidden, and block rubber-band scrolling
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.style.overflow = "hidden";
+    document.documentElement.style.height = "100%";
+    document.body.style.overflow = "hidden";
+    document.body.style.height = "100%";
+
+    const handleTouchMove = (e: TouchEvent) => {
+      let el = e.target as HTMLElement | null;
+      while (el && el !== document.body) {
+        if (el.scrollHeight > el.clientHeight) {
+          const style = window.getComputedStyle(el);
+          if (style.overflowY === "auto" || style.overflowY === "scroll" || el.classList.contains("overflow-y-auto")) {
+            return; // Allow scrolling inside explicitly scrollable lists
+          }
+        }
+        el = el.parentElement;
+      }
+      if (e.cancelable) {
+        e.preventDefault(); // Prevent body rubber-banding
+      }
+    };
+
+    document.addEventListener("touchmove", handleTouchMove, { passive: false });
+    return () => {
+      document.removeEventListener("touchmove", handleTouchMove);
     };
   }, []);
 
@@ -763,13 +796,13 @@ export default function App() {
 
   return (
     <div 
-      className="min-h-screen w-full flex justify-center transition-all duration-300 relative select-none font-sans mobile-no-scrollbar" 
+      className="h-full w-full flex justify-center transition-all duration-300 relative select-none font-sans mobile-no-scrollbar overflow-hidden" 
       style={{ backgroundColor: themeConfig.bg, color: themeConfig.text }}
     >
       {currentTheme === "cat" && view === "home" && <CatBackground theme={themeConfig} />}
       <div 
-        className={`w-full max-w-[420px] flex flex-col mobile-no-scrollbar ${view !== "home" ? "overflow-hidden" : "h-screen max-md:h-dvh px-4 justify-between py-6 overflow-y-auto"}`}
-        style={{ height: view !== "home" ? viewportHeight : undefined }}
+        className={`w-full max-w-[420px] flex flex-col mobile-no-scrollbar ${view === "home" ? "px-4 py-6 overflow-y-auto justify-between" : "overflow-hidden"}`}
+        style={{ height: viewportHeight }}
       >
         
         {/* TOP THEME TOGGLE / SECURITY BADGE IN HOMEPAGE */}
