@@ -796,13 +796,12 @@ export default function App() {
 
   return (
     <div 
-      className="h-full w-full flex justify-center transition-all duration-300 relative select-none font-sans mobile-no-scrollbar overflow-hidden" 
-      style={{ backgroundColor: themeConfig.bg, color: themeConfig.text }}
+      className="fixed inset-0 w-full h-full flex justify-center transition-all duration-300 select-none font-sans mobile-no-scrollbar overflow-hidden" 
+      style={{ backgroundColor: themeConfig.bg, color: themeConfig.text, height: viewportHeight }}
     >
       {currentTheme === "cat" && view === "home" && <CatBackground theme={themeConfig} />}
       <div 
-        className={`w-full max-w-[420px] flex flex-col mobile-no-scrollbar ${view === "home" ? "px-4 py-6 overflow-y-auto justify-between" : "overflow-hidden"}`}
-        style={{ height: viewportHeight }}
+        className={`w-full max-w-[420px] h-full flex flex-col mobile-no-scrollbar ${view === "home" ? "px-4 py-6 overflow-y-auto justify-between" : "overflow-hidden"}`}
       >
         
         {/* TOP THEME TOGGLE / SECURITY BADGE IN HOMEPAGE */}
