@@ -89,15 +89,65 @@ export default function RandomChatView({ theme, onLeave }: RandomChatViewProps) 
   const unsubscribesRef = useRef<(() => void)[]>([]);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const scrollToBottom = () => {
+  const headerRef = useRef<HTMLElement | null>(null);
+  const footerRef = useRef<HTMLElement | null>(null);
+  const [mainHeight, setMainHeight] = useState<string | number>("auto");
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+
+    const handleResize = () => {
+      const vv = window.visualViewport;
+      if (!vv) return;
+
+      const viewportH = vv.height;
+      const headerH = headerRef.current ? headerRef.current.offsetHeight : 52;
+      const footerH = footerRef.current ? footerRef.current.offsetHeight : 76;
+
+      const available = viewportH - headerH - footerH - 32;
+
+      setMainHeight(available > 80 ? available : 80);
+    };
+
+    handleResize();
+
+    window.visualViewport.addEventListener("resize", handleResize);
+    window.visualViewport.addEventListener("scroll", handleResize);
+    window.addEventListener("resize", handleResize);
+
+    const timer = setTimeout(handleResize, 100);
+
+    return () => {
+      window.visualViewport?.removeEventListener("resize", handleResize);
+      window.visualViewport?.removeEventListener("scroll", handleResize);
+      window.removeEventListener("resize", handleResize);
+      clearTimeout(timer);
+    };
+  }, [matchStatus, securityError]);
+
+  const scrollToBottom = (behavior: "smooth" | "auto" = "smooth") => {
     setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      messagesEndRef.current?.scrollIntoView({ behavior });
     }, 100);
   };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, matchStatus]);
+
+  // Auto-scroll to bottom when keyboard opens/closes via visual viewport
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+    const handleViewportChange = () => {
+      scrollToBottom("auto");
+    };
+    window.visualViewport.addEventListener("resize", handleViewportChange);
+    window.visualViewport.addEventListener("scroll", handleViewportChange);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", handleViewportChange);
+      window.visualViewport?.removeEventListener("scroll", handleViewportChange);
+    };
+  }, []);
 
   // Handle matchmaking on mount
   useEffect(() => {
@@ -450,6 +500,7 @@ export default function RandomChatView({ theme, onLeave }: RandomChatViewProps) 
     <div className="flex flex-col h-full w-full relative overflow-hidden" style={{ backgroundColor: theme.bg }}>
       {/* Top Header */}
       <header 
+        ref={headerRef}
         className="h-16 max-md:h-[52px] px-4 flex items-center justify-between border-b shrink-0 z-20"
         style={{ borderColor: theme.border, backgroundColor: theme.bg }}
       >
@@ -476,7 +527,10 @@ export default function RandomChatView({ theme, onLeave }: RandomChatViewProps) 
       </header>
 
       {/* Main Container Area */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col justify-between relative mobile-no-scrollbar">
+      <div 
+        className="flex-1 overflow-y-auto px-4 py-4 flex flex-col justify-between relative mobile-no-scrollbar"
+        style={{ height: mainHeight, maxHeight: mainHeight, minHeight: 0 }}
+      >
         {securityError && (
           <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
             <div className="w-14 h-14 rounded-full flex items-center justify-center bg-red-100 dark:bg-red-950/40 text-red-600">
@@ -586,6 +640,7 @@ export default function RandomChatView({ theme, onLeave }: RandomChatViewProps) 
 
       {/* Input / controls footer bar */}
       <footer 
+        ref={footerRef}
         className="p-4 border-t z-10 shrink-0" 
         style={{ borderColor: theme.border, backgroundColor: theme.bg }}
       >

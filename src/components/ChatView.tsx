@@ -675,6 +675,61 @@ export default function ChatView({
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
+  const participantsTrayRef = useRef<HTMLDivElement | null>(null);
+  const pinnedBannerRef = useRef<HTMLDivElement | null>(null);
+  const footerRef = useRef<HTMLElement | null>(null);
+  const mainRef = useRef<HTMLElement | null>(null);
+
+  const [mainHeight, setMainHeight] = useState<string | number>("auto");
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+
+    const handleResize = () => {
+      const vv = window.visualViewport;
+      if (!vv) return;
+
+      const viewportH = vv.height;
+      
+      const headerH = headerRef.current ? headerRef.current.offsetHeight : 52;
+      const participantsH = participantsTrayRef.current ? participantsTrayRef.current.offsetHeight : 0;
+      const pinnedH = pinnedBannerRef.current ? pinnedBannerRef.current.offsetHeight : 0;
+      const footerH = footerRef.current ? footerRef.current.offsetHeight : 80;
+
+      let topSpace = 0;
+      if (participantsTrayRef.current) {
+        const isMobile = window.innerWidth < 768;
+        const mt = isMobile ? 60 : 80;
+        topSpace = mt + participantsH;
+      } else {
+        topSpace = headerH;
+      }
+
+      if (pinnedBannerRef.current) {
+        topSpace += pinnedH + 8;
+      }
+
+      const available = viewportH - topSpace - footerH;
+
+      setMainHeight(available > 80 ? available : 80);
+    };
+
+    handleResize();
+
+    window.visualViewport.addEventListener("resize", handleResize);
+    window.visualViewport.addEventListener("scroll", handleResize);
+    window.addEventListener("resize", handleResize);
+
+    const timer = setTimeout(handleResize, 100);
+
+    return () => {
+      window.visualViewport?.removeEventListener("resize", handleResize);
+      window.visualViewport?.removeEventListener("scroll", handleResize);
+      window.removeEventListener("resize", handleResize);
+      clearTimeout(timer);
+    };
+  }, [participants, pinnedMessageId, showSearchBar, searchQuery, replyingTo, editingMessage]);
 
   useEffect(() => {
     if (replyingTo) {
@@ -693,9 +748,9 @@ export default function ChatView({
     }, 1500);
   };
 
-  const scrollToBottom = () => {
+  const scrollToBottom = (behavior: "smooth" | "auto" = "smooth") => {
     setTimeout(() => {
-      messageEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      messageEndRef.current?.scrollIntoView({ behavior });
     }, 100);
   };
 
@@ -703,7 +758,7 @@ export default function ChatView({
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
     const handleViewportChange = () => {
-      scrollToBottom();
+      scrollToBottom("auto");
     };
     window.visualViewport.addEventListener("resize", handleViewportChange);
     window.visualViewport.addEventListener("scroll", handleViewportChange);
@@ -1056,6 +1111,7 @@ export default function ChatView({
 
       {/* HEADER TOP BAR */}
       <header 
+        ref={headerRef}
         className="absolute top-0 left-0 w-full h-16 max-md:h-[52px] px-4 flex items-center justify-between border-b z-20 transition-all duration-300"
         style={{ 
           borderColor: theme.border, 
@@ -1188,6 +1244,7 @@ export default function ChatView({
 
       {/* ACTIVE PARTICIPANTS TRAY */}
       <div 
+        ref={participantsTrayRef}
         className="mt-20 max-md:mt-[60px] mx-4 max-md:mx-2 px-4 max-md:px-3 py-2 max-md:py-1.5 flex items-center justify-between rounded-2xl max-md:rounded-xl border text-xs font-medium transition-all duration-300 select-none"
         style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
       >
@@ -1232,6 +1289,7 @@ export default function ChatView({
 
         return (
           <div 
+            ref={pinnedBannerRef}
             className="mt-2 mx-4 max-md:mx-2 px-4 max-md:px-3 py-2 max-md:py-1.5 flex items-center justify-between rounded-2xl max-md:rounded-xl border text-xs font-semibold select-none shadow-sm cursor-pointer hover:opacity-95 transition-all active:scale-[0.99]"
             style={{ borderColor: theme.border, backgroundColor: theme.card, color: theme.text }}
             onClick={handleJumpToPinned}
@@ -1264,6 +1322,7 @@ export default function ChatView({
 
       {/* MESSAGE LIST */}
       <main 
+        ref={mainRef}
         onScroll={handleScroll}
         className={`flex-1 px-1 pt-4 pb-4 max-md:pb-3 mobile-no-scrollbar ${currentThemeType === "cat" ? "cat-scrollbar" : ""}`}
         style={{
@@ -1272,7 +1331,11 @@ export default function ChatView({
           justifyContent: "flex-start",
           alignItems: "stretch",
           gap: "12px",
-          overflowY: "auto"
+          overflowY: "auto",
+          height: mainHeight,
+          maxHeight: mainHeight,
+          minHeight: 0,
+          flex: "1 1 auto"
         }}
       >
         {/* STEP 3: Log messages.length immediately before rendering */}
@@ -1477,6 +1540,7 @@ export default function ChatView({
 
       {/* BOTTOM INPUT FOOTER */}
       <footer 
+        ref={footerRef}
         className="relative w-full px-4 pb-4 max-md:pb-4 pt-3 max-md:pt-2 shrink-0 z-20 border-t transition-all duration-300 flex flex-col gap-2 max-md:gap-1.5"
         style={{ borderColor: theme.border, backgroundColor: theme.bg }}
       >
